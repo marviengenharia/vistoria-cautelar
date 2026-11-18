@@ -396,3 +396,22 @@ input:focus, select:focus, textarea:focus { border-color: var(--tinta); outline:
   padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
   background: var(--asfalto); color: #fff; font: 700 17px var(--texto);
 }
+
+/* ================= área de assinatura ================= */
+/* O canvas é sempre branco com traço preto (vira PNG num documento), nos dois temas. */
+.area-assinatura {
+  position: relative; width: 100%;
+  background: #fff; border: 3px solid #000; border-radius: var(--raio);
+  overflow: hidden;
+}
+.area-assinatura canvas {
+  display: block; width: 100%; height: auto;
+  touch-action: none; cursor: crosshair;
+}
+/* linha-guia "Assine aqui": só no CSS, não entra no PNG, e não pega toques */
+.area-assinatura::after {
+  content: 'Assine aqui'; position: absolute; left: 16px; right: 16px; bottom: 18%;
+  padding-top: 4px; border-top: 2px solid #9a9a9a;
+  font: 600 14px var(--texto); color: #777;
+  pointer-events: none;
+}

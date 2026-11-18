@@ -16,6 +16,7 @@ const ARQUIVOS = [
   'js/exif.js',
   'js/gps.js',
   'js/util.js',
+  'js/area-assinatura.js',
   'js/tela-lista.js',
   'js/tela-imovel.js',
   'js/tela-ambientes.js',

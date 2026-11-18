@@ -134,4 +134,37 @@ export default async function ({ page, base, ok }) {
   ok(r.textoUma.includes('em 05/01/2026') && r.textoUma.includes('a 1 foto registrada mostra'), 'termo de ciência: data com zero e singular');
   ok(r.textoRecusa === 'Declaro que presenciei, em 18/11/2026, a recusa do ocupante do imóvel IM-001 em permitir a vistoria cautelar. Motivo informado: sem tempo.', 'texto do termo de recusa');
   ok(r.restantes === 0, 'excluirImovel apaga as assinaturas');
+
+  // ---- área de assinatura (desenho com o mouse/dedo) ----
+  await page.goto(base + 'manifest.json');
+  await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="c" style="width:400px"></div>';
+    const m = await import('/js/area-assinatura.js');
+    window.mudou = 0;
+    window.area = m.criarAreaAssinatura(document.getElementById('c'), { aoMudar: () => { window.mudou++; } });
+  });
+  const caixa = await (await page.$('#c canvas')).boundingBox();
+  const arrastar = async (dx) => {
+    const y = caixa.y + caixa.height / 2;
+    await page.mouse.move(caixa.x + 20, y);
+    await page.mouse.down();
+    await page.mouse.move(caixa.x + 20 + dx, y + 10, { steps: 10 });
+    await page.mouse.up();
+  };
+  ok(await page.evaluate(() => window.area.vazia()), 'área de assinatura começa vazia');
+  await page.mouse.click(caixa.x + 50, caixa.y + 50);
+  ok(await page.evaluate(() => window.area.vazia()), 'clique único não conta como assinatura');
+  await arrastar(200);
+  ok(!(await page.evaluate(() => window.area.vazia())), 'arrasto de 200 px conta como assinatura');
+  ok(await page.evaluate(() => window.mudou > 0), 'aoMudar é chamado ao assinar');
+  const png = await page.evaluate(async () => {
+    const b = await window.area.paraPng();
+    const img = await createImageBitmap(b);
+    const c = document.querySelector('#c canvas');
+    return { tipo: b.type, igual: img.width === c.width && img.height === c.height, proporcao: img.width / img.height };
+  });
+  ok(png.tipo === 'image/png' && png.igual && png.proporcao === 2, `paraPng devolve PNG do tamanho do canvas 2:1 (${png.tipo})`);
+  await page.evaluate(() => window.area.limpar());
+  ok(await page.evaluate(() => window.area.vazia()), 'limpar() deixa a área vazia');
+  await page.evaluate(() => window.area.destruir());
 }
