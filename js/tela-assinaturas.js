@@ -5,7 +5,7 @@ import {
   obterImovel, listarAmbientes, listarFotosDoImovel, listarAssinaturas, gravarAssinatura,
   obterConfig, gravarConfig,
 } from './db.js';
-import { textoTermoCiencia, textoTermoRecusa } from './dominio.js';
+import { textoTermoCiencia, textoTermoRecusa, FOTOS_MUDARAM } from './dominio.js';
 import { criarAreaAssinatura } from './area-assinatura.js';
 import { esc, dataHora, mostrarMensagem, abrirTelaCheia } from './util.js';
 
@@ -28,6 +28,7 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
   let urls = [];
   let areas = {}; // bloco -> área de assinatura (criada quando o bloco abre pela primeira vez)
   let termo = '';
+  let idsFotosConferidas = []; // fotos mostradas no formulário: são elas que a assinatura cobre
 
   const liberarUrls = () => { urls.forEach((u) => URL.revokeObjectURL(u)); urls = []; };
   const urlDe = (blob) => { const u = URL.createObjectURL(blob); urls.push(u); return u; };
@@ -112,7 +113,8 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
       return [
         blocoRecusa(),
         blocoPessoa('testemunha', 'Testemunha',
-          campoTexto('Nome da testemunha', 'testemunhaNome', imovel.recusaTestemunha, 'autocapitalize="words"'), true),
+          campoTexto('Nome da testemunha', 'testemunhaNome', imovel.recusaTestemunha, 'readonly')
+          + '<p class="ajuda">O nome vem da aba Dados. Para mudar, vá na aba Dados, bloco Situação.</p>', true),
         blocoPessoa('vistoriador', 'Vistoriador',
           campoTexto('Nome do vistoriador', 'vistoriadorNome', nomeVistoriador ?? '', 'autocapitalize="words"'), false),
       ];
@@ -172,7 +174,9 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
         ${imagensAssinatura(ultima)}
       </section>
       ${novas ? `<p class="aviso-novas">${plural(novas, 'foto foi tirada', 'fotos foram tiradas')} depois desta assinatura.
-        Para o morador conferir, colha uma nova assinatura.</p>` : ''}
+        ${ultima.tipo === 'recusa'
+          ? 'Para que elas constem numa assinatura, colha uma nova.'
+          : 'Para o morador conferir, colha uma nova assinatura.'}</p>` : ''}
       <p class="ajuda">As fotos assinadas não podem ser apagadas. A classificação das fotos e a aba Dados continuam livres para completar.</p>
       ${anteriores.length ? `
         <details class="bloco" data-bloco="historico">
@@ -192,12 +196,15 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
 
   function desenharFormulario() {
     termo = textoDoTermo();
+    idsFotosConferidas = fotos.map((f) => f.id);
     const blocos = blocosDoFormulario();
     conteudo.innerHTML = `
       ${colhendoNova ? `<p class="aviso-novas">A assinatura anterior fica guardada no histórico.
         A nova cobre todas as fotos de agora.</p>` : ''}
       <form id="form-assinaturas" autocomplete="off" novalidate>
-        ${blocos.map((b, i) => htmlBloco(b, i === blocos.length - 1)).join('')}
+        <fieldset class="sem-moldura">
+          ${blocos.map((b, i) => htmlBloco(b, i === blocos.length - 1)).join('')}
+        </fieldset>
       </form>
       <p class="ajuda">As assinaturas só ficam gravadas ao tocar em "Concluir assinaturas".
         Se sair desta aba antes, será preciso assinar de novo.</p>
@@ -254,13 +261,27 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
     if (tipo() === 'recusa') {
       if (!imovel.fachada) return falta(null, 'Falta a foto da fachada. Tire a foto no topo da tela.');
       if (!motivo()) return falta(null, 'Falta o motivo da recusa. Preencha na aba Dados, bloco Situação.');
+      if (!valor('testemunhaNome')) return falta(null, 'Falta o nome da testemunha. Preencha na aba Dados, bloco Situação.');
       return pessoa('testemunha', 'da testemunha', 'Testemunha') && pessoa('vistoriador', 'do vistoriador', 'Vistoriador');
     }
     if (!fotos.length) return falta(null, 'Não há fotos para o morador conferir. Tire as fotos na aba Ambientes.');
     return pessoa('morador', 'do morador', 'Morador') && pessoa('vistoriador', 'do vistoriador', 'Vistoriador');
   }
 
-  async function concluir(botao) {
+  /** Trava (ou libera) o formulário e os botões enquanto grava. */
+  function travar(sim) {
+    const fieldset = conteudo.querySelector('#form-assinaturas fieldset');
+    if (fieldset) fieldset.disabled = sim;
+    const botao = conteudo.querySelector('#concluir-assinaturas');
+    if (botao) {
+      botao.disabled = sim;
+      botao.textContent = sim ? 'Gravando…' : 'Concluir assinaturas';
+    }
+    const cancelar = conteudo.querySelector('#cancelar-nova');
+    if (cancelar) cancelar.disabled = sim;
+  }
+
+  async function concluir() {
     if (!validar()) return;
     // a data do termo é a de hoje: se virou o dia com a tela aberta, mostra o texto novo antes
     const texto = textoDoTermo();
@@ -270,38 +291,53 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
       mostrarMensagem('O texto do termo mudou de data. Confira e toque de novo em "Concluir assinaturas".', 'erro');
       return;
     }
-    botao.disabled = true;
-    botao.textContent = 'Gravando…';
+    // as imagens saem todas juntas, antes de qualquer espera, e o formulário trava
+    const quem = tipo() === 'recusa' ? 'testemunha' : 'morador';
+    const pngs = Promise.all([areas.vistoriador.paraPng(), areas[quem].paraPng()]);
+    travar(true);
     mostrarEstado('salvando', 'Salvando…');
+    const vistoriadorNome = valor('vistoriadorNome');
     try {
-      const vistoriador = { nome: valor('vistoriadorNome'), assinatura: await areas.vistoriador.paraPng() };
-      const dados = { tipo: tipo(), texto, inicio: fotos[0]?.tiradaEm ?? null, vistoriador };
+      const [pngVistoriador, pngOutro] = await pngs;
+      const dados = {
+        tipo: tipo(), texto, inicio: fotos[0]?.tiradaEm ?? null, idsFotosConferidas,
+        vistoriador: { nome: vistoriadorNome, assinatura: pngVistoriador },
+      };
       if (dados.tipo === 'recusa') {
-        dados.testemunha = { nome: valor('testemunhaNome'), assinatura: await areas.testemunha.paraPng() };
+        dados.testemunha = { nome: valor('testemunhaNome'), assinatura: pngOutro };
         dados.motivoRecusa = motivo();
       } else {
-        dados.ocupante = {
-          nome: valor('moradorNome'),
-          documento: valor('moradorDocumento'),
-          assinatura: await areas.morador.paraPng(),
-        };
+        dados.ocupante = { nome: valor('moradorNome'), documento: valor('moradorDocumento'), assinatura: pngOutro };
       }
       await gravarAssinatura(imovel.id, dados);
-      await gravarConfig('vistoriadorNome', vistoriador.nome);
-      mostrarEstado('ok', 'Salvo');
-      colhendoNova = false;
-      await carregar();
-      desenhar();
-      await aoMudarImovel(); // a situação pode ter passado para "Vistoriado"
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      mostrarMensagem('Assinaturas gravadas.');
     } catch (erro) {
+      if (erro.message === FOTOS_MUDARAM) {
+        // quem assina não viu essas fotos: recarrega a tela para conferir e assinar de novo
+        mostrarEstado('erro', 'Não gravado');
+        await carregar();
+        desenhar();
+        mostrarMensagem(FOTOS_MUDARAM, 'erro');
+        return;
+      }
       console.error(erro);
       mostrarEstado('erro', 'Erro ao salvar');
       mostrarMensagem('Não foi possível gravar as assinaturas. Tente de novo.', 'erro');
-      botao.disabled = false;
-      botao.textContent = 'Concluir assinaturas';
+      travar(false);
+      return;
     }
+    // a assinatura já está gravada: falha ao lembrar o nome não é falha da assinatura
+    try {
+      await gravarConfig('vistoriadorNome', vistoriadorNome);
+    } catch (erro) {
+      console.error(erro);
+    }
+    mostrarEstado('ok', 'Salvo');
+    colhendoNova = false;
+    await carregar();
+    desenhar();
+    await aoMudarImovel(); // a situação pode ter passado para "Vistoriado"
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    mostrarMensagem('Assinaturas gravadas.');
   }
 
   conteudo.addEventListener('submit', (e) => e.preventDefault());
@@ -331,7 +367,7 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
       return;
     }
     if (e.target.closest('#concluir-assinaturas')) {
-      await concluir(e.target.closest('#concluir-assinaturas'));
+      await concluir();
     } else if (e.target.closest('#nova-assinatura')) {
       colhendoNova = true;
       desenhar();
@@ -356,6 +392,9 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
       return;
     }
     // formulário aberto: troca só o primeiro bloco (fotos ou recusa) e mantém os traços
+    const antes = new Set(idsFotosConferidas);
+    idsFotosConferidas = fotos.map((f) => f.id);
+    const mudouFotos = antes.size !== idsFotosConferidas.length || idsFotosConferidas.some((id) => !antes.has(id));
     const [primeiro] = blocosDoFormulario();
     const antigo = conteudo.querySelector(`details[data-bloco="${primeiro.id}"]`);
     const aberto = antigo.open;
@@ -363,11 +402,16 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
     conteudo.querySelector(`details[data-bloco="${primeiro.id}"]`).open = aberto;
     const texto = textoDoTermo();
     if (texto !== termo) {
-      // o número de fotos mudou: quem assinou o texto antigo assina de novo
       termo = texto;
       conteudo.querySelectorAll('form .termo').forEach((p) => { p.textContent = texto; });
+    }
+    if (mudouFotos) {
+      // quem assinou viu outras fotos: assina de novo
       areas.morador?.limpar();
-      mostrarMensagem('As fotos mudaram. O morador precisa assinar de novo.', 'erro');
+      areas.testemunha?.limpar();
+      mostrarMensagem(tipo() === 'recusa'
+        ? 'As fotos mudaram. A testemunha precisa assinar de novo.'
+        : 'As fotos mudaram. O morador precisa assinar de novo.', 'erro');
     }
   };
   return sair;

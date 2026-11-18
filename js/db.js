@@ -1,6 +1,6 @@
 // Banco de dados do app (IndexedDB, fica só no aparelho).
 import { openDB } from '../vendor/idb/index.js';
-import { imovelVazio, NOME_AMBIENTE_FACHADA, FOTO_ASSINADA } from './dominio.js';
+import { imovelVazio, NOME_AMBIENTE_FACHADA, FOTO_ASSINADA, FOTOS_MUDARAM } from './dominio.js';
 import { impressaoDigital } from './foto.js';
 
 const NOME_BANCO = 'vistoria-cautelar';
@@ -183,14 +183,19 @@ export async function obterFoto(id) {
   return db.get('fotos', id);
 }
 
+const CAMPOS_CLASSIFICACAO = ['patologias', 'local', 'abertura', 'descricao'];
+
 /** Grava a classificação da foto (patologias, local, abertura, descrição). A imagem nunca muda. */
 export async function atualizarFoto(id, alteracoes) {
   const db = await bancoPronto;
   const tx = db.transaction('fotos', 'readwrite');
   const atual = await tx.store.get(id);
   if (!atual) throw new Error('Foto não encontrada.');
-  const { blob, miniatura, hash, ...permitidas } = alteracoes; // a imagem não pode ser trocada
-  const nova = { ...atual, ...permitidas, id };
+  // lista branca: só a classificação muda; imagem, horas, imóvel e ambiente ficam como estão
+  const nova = { ...atual };
+  for (const campo of CAMPOS_CLASSIFICACAO) {
+    if (campo in alteracoes) nova[campo] = alteracoes[campo];
+  }
   await tx.store.put(nova);
   await tx.done;
   return nova;
@@ -274,31 +279,71 @@ export async function gravarConfig(chave, valor) {
 
 // ===================== assinaturas =====================
 
+const mesmoConjunto = (a, b) => {
+  const conjunto = new Set(a);
+  return conjunto.size === new Set(b).size && b.every((id) => conjunto.has(id));
+};
+
+/**
+ * Código de verificação (SHA-256) de uma assinatura. Monta o conteúdo em ordem fixa, para que
+ * qualquer pessoa possa recalcular o código a partir do registro gravado e conferir que nada mudou.
+ * Cada imagem de assinatura entra pelo próprio SHA-256.
+ */
+export async function codigoDaAssinatura(registro) {
+  const pessoa = async (p) => (p
+    ? { nome: p.nome ?? null, documento: p.documento ?? null, assinatura: await impressaoDigital(p.assinatura) }
+    : null);
+  const conteudo = {
+    tipo: registro.tipo ?? null,
+    imovelId: registro.imovelId ?? null,
+    assinadoEm: registro.assinadoEm ?? null,
+    inicio: registro.inicio ?? null,
+    texto: registro.texto ?? null,
+    motivoRecusa: registro.motivoRecusa ?? null,
+    fotos: registro.fotos.map((f) => ({ id: f.id, hash: f.hash ?? null })),
+    ocupante: await pessoa(registro.ocupante),
+    testemunha: await pessoa(registro.testemunha),
+    vistoriador: await pessoa(registro.vistoriador),
+  };
+  return impressaoDigital(new Blob([JSON.stringify(conteudo)]));
+}
+
 /**
  * Grava uma assinatura (ciência ou recusa) com a lista das fotos do imóvel nesse momento.
- * O `codigo` é o SHA-256 do conteúdo; cada imagem de assinatura entra pelo próprio SHA-256.
+ * `dados.idsFotosConferidas` são as fotos que estavam na tela: se o banco tiver outras,
+ * nada é gravado (o morador não pode assinar por uma foto que não viu).
  */
 export async function gravarAssinatura(imovelId, dados) {
   const db = await bancoPronto;
+  const conferidas = dados.idsFotosConferidas ?? [];
   const fotos = (await listarFotosDoImovel(imovelId)).map((f) => ({ id: f.id, hash: f.hash }));
-  const assinadoEm = agora();
-  const id = novoId('ASS');
+  if (!mesmoConjunto(fotos.map((f) => f.id), conferidas)) throw new Error(FOTOS_MUDARAM);
 
-  const resumir = async (pessoa) => (pessoa ? { ...pessoa, assinatura: await impressaoDigital(pessoa.assinatura) } : null);
-  const paraCodigo = {
-    id, imovelId, assinadoEm, fotos,
+  const pessoa = (p) => (p ? { nome: p.nome, documento: p.documento ?? null, assinatura: p.assinatura } : null);
+  const assinatura = {
+    id: novoId('ASS'),
+    imovelId,
     tipo: dados.tipo,
+    assinadoEm: agora(),
+    inicio: dados.inicio ?? null,
     texto: dados.texto,
-    inicio: dados.inicio,
-    ocupante: await resumir(dados.ocupante),
-    testemunha: await resumir(dados.testemunha),
-    vistoriador: await resumir(dados.vistoriador),
     motivoRecusa: dados.motivoRecusa ?? null,
+    fotos,
+    ocupante: pessoa(dados.ocupante),
+    testemunha: pessoa(dados.testemunha),
+    vistoriador: pessoa(dados.vistoriador),
   };
-  const codigo = await impressaoDigital(new Blob([JSON.stringify(paraCodigo)]));
-  const assinatura = { id, imovelId, assinadoEm, fotos, ...dados, codigo };
+  // os hashes são calculados antes de abrir a transação (crypto.subtle a fecharia)
+  assinatura.codigo = await codigoDaAssinatura(assinatura);
 
-  const tx = db.transaction(['assinaturas', 'imoveis'], 'readwrite');
+  const tx = db.transaction(['assinaturas', 'imoveis', 'fotos'], 'readwrite');
+  // confere de novo dentro da transação: nenhuma foto pode ter entrado ou saído no meio
+  const agoraNoBanco = await tx.objectStore('fotos').index('imovelId').getAllKeys(imovelId);
+  if (!mesmoConjunto(agoraNoBanco, conferidas)) {
+    tx.abort();
+    await tx.done.catch(() => {});
+    throw new Error(FOTOS_MUDARAM);
+  }
   await tx.objectStore('assinaturas').add(assinatura);
   if (dados.tipo === 'ciencia') {
     const imovel = await tx.objectStore('imoveis').get(imovelId);

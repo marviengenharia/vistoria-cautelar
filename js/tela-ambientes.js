@@ -20,8 +20,10 @@ function situacaoFoto(foto) {
 /** Linhas com a hora da foto: quando foi tirada (se souber) e quando entrou no app. */
 function horasDaFoto(foto) {
   const entrou = `Entrou no app em ${dataHora(foto.entrouEm ?? foto.tiradaEm)}.`;
-  const origem = { exif: 'hora da câmera', arquivo: 'data do arquivo' }[foto.origemHora];
-  return origem ? `Tirada em ${dataHora(foto.tiradaEm)} (${origem}).<br>${entrou}` : entrou;
+  // a data do arquivo não prova a hora da foto (pode ser a hora da cópia): diz só o que é
+  if (foto.origemHora === 'exif') return `Tirada em ${dataHora(foto.tiradaEm)} (hora da câmera).<br>${entrou}`;
+  if (foto.origemHora === 'arquivo') return `Data do arquivo: ${dataHora(foto.tiradaEm)}.<br>${entrou}`;
+  return entrou;
 }
 
 function resumoAmbiente(fotos) {
@@ -71,6 +73,7 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
   let editor = null; // { fechar: async () => void }
   let assinaturaDaFoto = new Map(); // id da foto -> primeira assinatura que a incluiu
   let temAssinatura = false;
+  let ultimaAssinatura = null;
 
   const liberarUrls = () => { urls.forEach((u) => URL.revokeObjectURL(u)); urls = []; };
 
@@ -79,6 +82,7 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
     fotosPorAmbiente = new Map(await Promise.all(ambientes.map(async (a) => [a.id, await listarFotos(a.id)])));
     const assinaturas = await listarAssinaturas(imovel.id); // a mais nova primeiro
     temAssinatura = assinaturas.length > 0;
+    ultimaAssinatura = assinaturas[0] ?? null;
     assinaturaDaFoto = new Map();
     assinaturas.forEach((a) => a.fotos.forEach((f) => assinaturaDaFoto.set(f.id, a))); // fica a mais antiga
   }
@@ -254,6 +258,9 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
     const textoAssinada = assinatura && (assinatura.tipo === 'recusa'
       ? `Registrada no Termo de Recusa em ${dataHora(assinatura.assinadoEm)}.`
       : `Assinada pelo morador em ${dataHora(assinatura.assinadoEm)}.`);
+    const textoDepois = !assinatura && ultimaAssinatura && (ultimaAssinatura.tipo === 'recusa'
+      ? 'Foto tirada depois da última assinatura; ainda não consta em nenhuma assinatura.'
+      : 'Foto tirada depois da última assinatura; ainda não foi conferida pelo morador.');
 
     const grupos = [...new Set(PATOLOGIAS.map((p) => p.grupo))];
     const caixa = document.createElement('div');
@@ -297,6 +304,7 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
         <p class="ajuda editor-prova">${horasDaFoto(foto)}<br>
           Código de verificação: <code>${foto.hash ? foto.hash.slice(0, 16) : '—'}</code></p>
         ${textoAssinada ? `<p class="foto-assinada">🔒 ${textoAssinada}<br>Esta foto não pode ser apagada.</p>` : ''}
+        ${textoDepois ? `<p class="ajuda foto-depois">${textoDepois}</p>` : ''}
         <button type="button" class="botao botao-largo" data-editor="proxima">${ultimaFoto ? 'OK' : 'OK, próxima foto'}</button>
         ${textoAssinada ? '' : '<button type="button" class="botao botao-perigo" data-editor="excluir">Excluir esta foto</button>'}
       </form>`;

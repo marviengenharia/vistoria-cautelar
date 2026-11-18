@@ -54,6 +54,14 @@ export default async function ({ page, base, ok }) {
     // classificação: não deixa trocar a imagem
     const f = await db.atualizarFoto(im.fachada.fotoId, { patologias: ['trinca'], abertura: 0.8, blob: blob('x') });
     out.classificada = { patologias: f.patologias, abertura: f.abertura, blobIntacto: f.blob.size === 'segunda!'.length };
+    // só a classificação muda: hora, imóvel e ambiente ficam
+    const antes = await db.obterFoto(im.fachada.fotoId);
+    const g = await db.atualizarFoto(im.fachada.fotoId, {
+      tiradaEm: '2000-01-01T00:00:00.000Z', imovelId: 'IM-999', ambienteId: 'AMB-x', entrouEm: 'x', origemHora: 'exif', id: 'FOTO-x', descricao: 'ok',
+    });
+    const relida = await db.obterFoto(im.fachada.fotoId);
+    out.listaBranca = ['tiradaEm', 'imovelId', 'ambienteId', 'entrouEm', 'origemHora', 'id', 'hash']
+      .every((k) => relida[k] === antes[k] && g[k] === antes[k]) && relida.descricao === 'ok';
 
     // excluir a foto da capa limpa a fachada do imóvel
     await db.excluirFoto(im.fachada.fotoId);
@@ -86,6 +94,7 @@ export default async function ({ page, base, ok }) {
   ok(r.ambientesAposTroca === 1, 'trocar a fachada não duplica o ambiente');
   ok(r.classificada.patologias.join() === 'trinca' && r.classificada.abertura === 0.8 && r.classificada.blobIntacto,
     'classificação gravada e a imagem não pode ser trocada');
+  ok(r.listaBranca, 'atualizarFoto não muda tiradaEm, imovelId e demais campos fora da classificação');
   ok(r.fachadaAposExcluirFoto === null, 'excluir a foto da capa deixa o imóvel sem fachada');
   ok(r.restos.join() === '0,0', `excluir imóvel apaga fotos e ambientes (${r.restos})`);
 }

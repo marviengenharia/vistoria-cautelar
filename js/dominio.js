@@ -164,7 +164,9 @@ export function imovelVazio(id) {
   };
 }
 
-export const FOTO_ASSINADA = 'Esta foto foi assinada pelo morador e não pode ser apagada.';
+export const FOTO_ASSINADA = 'Esta foto consta numa assinatura e não pode ser apagada nem trocada.';
+
+export const FOTOS_MUDARAM = 'As fotos mudaram enquanto a tela estava aberta. Confira as fotos e colha a assinatura de novo.';
 
 const dataBr = (d) => [
   String(d.getDate()).padStart(2, '0'),

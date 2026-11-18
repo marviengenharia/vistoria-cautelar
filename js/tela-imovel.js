@@ -2,6 +2,7 @@
 // Cada campo é gravado sozinho, sem botão "Salvar".
 import {
   obterImovel, atualizarImovel, excluirImovel, definirFachada, obterFoto, idsFotosAssinadas,
+  listarAssinaturas,
 } from './db.js';
 import {
   STATUS, LADOS, CONDICOES_OCUPANTE, USOS, ESTRUTURAS, COBERTURAS, FUNDACOES, IDADES,
@@ -461,7 +462,11 @@ export async function telaImovel(raiz, id, aba) {
 
     // ----- excluir -----
     conteudo.querySelector('#excluir').addEventListener('click', async () => {
-      if (!confirm(`Excluir ${id}? Os dados e as fotos deste imóvel serão apagados deste aparelho.`)) return;
+      const qtdAssinaturas = (await listarAssinaturas(id)).length;
+      const pergunta = qtdAssinaturas > 0
+        ? `Este imóvel tem ${qtdAssinaturas} ${qtdAssinaturas === 1 ? 'assinatura' : 'assinaturas'} (termo do morador ou de recusa). Excluir apaga também as assinaturas e as fotos assinadas, sem volta. Excluir mesmo?`
+        : `Excluir ${id}? Os dados e as fotos deste imóvel serão apagados deste aparelho.`;
+      if (!confirm(pergunta)) return;
       clearTimeout(temporizador);
       pendentes.clear();
       await gravando;
