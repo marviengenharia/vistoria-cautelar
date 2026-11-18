@@ -1,7 +1,7 @@
 // Aba Ambientes: ambientes do imóvel, fotos de cada um e marcação das patologias em cada foto.
 import {
   listarAmbientes, criarAmbiente, excluirAmbiente,
-  listarFotos, adicionarFoto, atualizarFoto, excluirFoto, obterFoto, obterImovel,
+  listarFotos, adicionarFoto, atualizarFoto, excluirFoto, obterFoto, obterImovel, listarAssinaturas,
 } from './db.js';
 import {
   AMBIENTES_SUGERIDOS, PATOLOGIAS, SEM_PATOLOGIA, PATOLOGIAS_COM_ABERTURA, LOCAIS_FOTO,
@@ -15,6 +15,13 @@ const ESPERA_DIGITACAO_MS = 400;
 function situacaoFoto(foto) {
   if (!foto.patologias.length) return 'pendente';
   return foto.patologias.includes(SEM_PATOLOGIA) ? 'ok' : 'patologia';
+}
+
+/** Linhas com a hora da foto: quando foi tirada (se souber) e quando entrou no app. */
+function horasDaFoto(foto) {
+  const entrou = `Entrou no app em ${dataHora(foto.entrouEm ?? foto.tiradaEm)}.`;
+  const origem = { exif: 'hora da câmera', arquivo: 'data do arquivo' }[foto.origemHora];
+  return origem ? `Tirada em ${dataHora(foto.tiradaEm)} (${origem}).<br>${entrou}` : entrou;
 }
 
 function resumoAmbiente(fotos) {
@@ -62,12 +69,18 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
   let ambienteAlvo = null; // ambiente que vai receber as fotos
   let urls = [];
   let editor = null; // { fechar: async () => void }
+  let assinaturaDaFoto = new Map(); // id da foto -> primeira assinatura que a incluiu
+  let temAssinatura = false;
 
   const liberarUrls = () => { urls.forEach((u) => URL.revokeObjectURL(u)); urls = []; };
 
   async function carregar() {
     ambientes = await listarAmbientes(imovel.id);
     fotosPorAmbiente = new Map(await Promise.all(ambientes.map(async (a) => [a.id, await listarFotos(a.id)])));
+    const assinaturas = await listarAssinaturas(imovel.id); // a mais nova primeiro
+    temAssinatura = assinaturas.length > 0;
+    assinaturaDaFoto = new Map();
+    assinaturas.forEach((a) => a.fotos.forEach((f) => assinaturaDaFoto.set(f.id, a))); // fica a mais antiga
   }
 
   function miniatura(foto, indice) {
@@ -80,8 +93,13 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
       patologia: `<span class="marca marca-patologia">${foto.patologias.length} ${foto.patologias.length === 1 ? 'patologia' : 'patologias'}</span>`,
     }[sit];
     const capa = imovel.fachada?.fotoId === foto.id ? '<span class="marca-capa">Capa</span>' : '';
-    return `<button type="button" class="miniatura-foto" data-foto="${foto.id}" aria-label="Foto ${indice + 1}: abrir para classificar">
-      <img src="${url}" alt="">${capa}${marca}</button>`;
+    const assinada = assinaturaDaFoto.has(foto.id);
+    const selo = assinada
+      ? '<span class="marca-cadeado" aria-hidden="true">🔒</span>'
+      : (temAssinatura ? '<span class="marca-depois">Depois da assinatura</span>' : '');
+    const estado = assinada ? ' (assinada)' : (temAssinatura ? ' (depois da assinatura)' : '');
+    return `<button type="button" class="miniatura-foto" data-foto="${foto.id}" aria-label="Foto ${indice + 1}${estado}: abrir para classificar">
+      <img src="${url}" alt="">${selo}${capa}${marca}</button>`;
   }
 
   function desenhar() {
@@ -167,7 +185,12 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
       const aviso = n ? ` e ${n === 1 ? 'a foto dele' : `as ${n} fotos dele`}` : '';
       if (!confirm(`Excluir o ambiente "${ambiente.nome}"${aviso}?`)) return;
       const tinhaCapa = (fotosPorAmbiente.get(ambienteId) ?? []).some((f) => f.id === imovel.fachada?.fotoId);
-      await excluirAmbiente(ambienteId);
+      try {
+        await excluirAmbiente(ambienteId);
+      } catch (erro) {
+        mostrarMensagem(erro.message, 'erro');
+        return;
+      }
       abertos.delete(ambienteId);
       if (tinhaCapa) {
         imovel = { ...imovel, fachada: null };
@@ -227,6 +250,10 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
     const ambiente = ambientes.find((a) => a.id === ambienteId);
     const urlFoto = URL.createObjectURL(foto.blob);
     const ultimaFoto = indice === fotos.length - 1;
+    const assinatura = assinaturaDaFoto.get(fotoId);
+    const textoAssinada = assinatura && (assinatura.tipo === 'recusa'
+      ? `Registrada no Termo de Recusa em ${dataHora(assinatura.assinadoEm)}.`
+      : `Assinada pelo morador em ${dataHora(assinatura.assinadoEm)}.`);
 
     const grupos = [...new Set(PATOLOGIAS.map((p) => p.grupo))];
     const caixa = document.createElement('div');
@@ -267,10 +294,11 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
           <span class="rotulo">Descrição</span>
           <textarea name="descricao" rows="3" placeholder="Ex.: trinca inclinada acima da porta">${esc(foto.descricao)}</textarea>
         </label>
-        <p class="ajuda editor-prova">Foto tirada em ${dataHora(foto.tiradaEm)}.<br>
+        <p class="ajuda editor-prova">${horasDaFoto(foto)}<br>
           Código de verificação: <code>${foto.hash ? foto.hash.slice(0, 16) : '—'}</code></p>
+        ${textoAssinada ? `<p class="foto-assinada">🔒 ${textoAssinada}<br>Esta foto não pode ser apagada.</p>` : ''}
         <button type="button" class="botao botao-largo" data-editor="proxima">${ultimaFoto ? 'OK' : 'OK, próxima foto'}</button>
-        <button type="button" class="botao botao-perigo" data-editor="excluir">Excluir esta foto</button>
+        ${textoAssinada ? '' : '<button type="button" class="botao botao-perigo" data-editor="excluir">Excluir esta foto</button>'}
       </form>`;
     document.body.append(caixa);
     document.body.classList.add('com-editor');
@@ -371,7 +399,12 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
         const eraCapa = imovel.fachada?.fotoId === fotoId;
         sujo = false;
         await gravando;
-        await excluirFoto(fotoId);
+        try {
+          await excluirFoto(fotoId);
+        } catch (erro) {
+          mostrarMensagem(erro.message, 'erro');
+          return;
+        }
         await fechar();
         if (eraCapa) {
           imovel = { ...imovel, fachada: null };

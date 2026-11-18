@@ -20,6 +20,7 @@ const ARQUIVOS = [
   'js/tela-lista.js',
   'js/tela-imovel.js',
   'js/tela-ambientes.js',
+  'js/tela-assinaturas.js',
   'vendor/idb/index.js',
   'vendor/fontes/barlow-latin-400-normal.woff2',
   'vendor/fontes/barlow-latin-500-normal.woff2',

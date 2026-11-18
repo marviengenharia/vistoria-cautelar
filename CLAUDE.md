@@ -7,10 +7,14 @@ Se não carregar (Drive `H:` desconectado), avisar antes de mexer em regras de n
 
 ## Estrutura
 - `index.html`, `manifest.json`, `service-worker.js` na raiz (publicados pelo GitHub Pages).
-- `js/app.js` roteador (`#/` lista, `#/imovel/IM-001/dados|ambientes`), `js/db.js` IndexedDB
-  (via `vendor/idb`; versão 2: `imoveis`, `config`, `ambientes`, `fotos`),
-  `js/dominio.js` listas de opções (patologias, locais, ambientes) e imóvel vazio, `js/gps.js`,
-  `js/foto.js` (redução 1600 px, carimbo, miniatura 240 px, SHA-256), `js/tela-*.js` uma tela por arquivo.
+- `js/app.js` roteador (`#/` lista, `#/imovel/IM-001/dados|ambientes|assinaturas`), `js/db.js` IndexedDB
+  (via `vendor/idb`; versão 3: `imoveis`, `config`, `ambientes`, `fotos`, `assinaturas` — histórico
+  por imóvel; foto que consta numa assinatura não pode ser apagada nem trocada),
+  `js/dominio.js` listas de opções (patologias, locais, ambientes), imóvel vazio e textos dos termos,
+  `js/gps.js`, `js/foto.js` (redução 1600 px, carimbo, miniatura 240 px, SHA-256),
+  `js/exif.js` (hora da foto lida do EXIF, sem biblioteca), `js/area-assinatura.js` (área para
+  assinar com o dedo, gera PNG), `js/tela-*.js` uma tela por arquivo (`tela-assinaturas.js` = aba
+  Assinaturas: termo de ciência ou de recusa).
 - `vendor/fontes/` Barlow e Barlow Condensed (licença OFL junto).
 - `tools/gerar_icones.py` gera `icons/*.png`.
 - `docs/mockups/` prévias de layout (não fazem parte do app).

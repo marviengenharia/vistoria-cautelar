@@ -1,15 +1,16 @@
 // Tela do imóvel: foto da fachada no topo + abas Dados → Ambientes → Assinaturas → Laudo.
 // Cada campo é gravado sozinho, sem botão "Salvar".
 import {
-  obterImovel, atualizarImovel, excluirImovel, definirFachada, obterFoto,
+  obterImovel, atualizarImovel, excluirImovel, definirFachada, obterFoto, idsFotosAssinadas,
 } from './db.js';
 import {
   STATUS, LADOS, CONDICOES_OCUPANTE, USOS, ESTRUTURAS, COBERTURAS, FUNDACOES, IDADES,
-  CONSERVACOES, rotuloDe,
+  CONSERVACOES, FOTO_ASSINADA, rotuloDe,
 } from './dominio.js';
 import { capturarGps } from './gps.js';
 import { prepararFoto } from './foto.js';
 import { telaAmbientes } from './tela-ambientes.js';
+import { telaAssinaturas } from './tela-assinaturas.js';
 import {
   esc, dataHora, numeroBr, mostrarMensagem, abrirTelaCheia, CASINHA_SVG,
 } from './util.js';
@@ -22,7 +23,6 @@ const ABAS = [
 ];
 
 const EM_BREVE = {
-  assinaturas: 'As assinaturas na tela chegam na etapa 4.',
   laudo: 'O laudo em PDF chega na etapa 5.',
 };
 
@@ -93,7 +93,7 @@ const BLOCOS = [
       <div data-so-se-recusado ${im.status === 'recusado' ? '' : 'hidden'}>
         ${campo('Motivo da recusa', `<textarea name="recusaMotivo" rows="3">${esc(im.recusaMotivo)}</textarea>`)}
         ${campo('Nome da testemunha', texto('recusaTestemunha', im.recusaTestemunha))}
-        <p class="ajuda">Tire a foto da fachada no topo da tela. O Termo de Recusa chega numa próxima etapa.</p>
+        <p class="ajuda">Tire a foto da fachada no topo da tela. O Termo de Recusa é assinado na aba Assinaturas.</p>
       </div>`,
   },
   {
@@ -219,6 +219,7 @@ export async function telaImovel(raiz, id, aba) {
   const entradaFachada = raiz.querySelector('#entrada-fachada');
   let urlCapa = null;
   let fotoCapa = null;
+  let fachadaAssinada = false; // a foto da fachada consta numa assinatura: não pode ser trocada
   let estadoSalvamento = { estado: 'ok', texto: 'Salvo' };
 
   function mostrarEstado(estado, textoEstado) {
@@ -245,6 +246,7 @@ export async function telaImovel(raiz, id, aba) {
     urlCapa = null;
     fotoCapa = imovel.fachada ? (await obterFoto(imovel.fachada.fotoId))?.blob ?? null : null;
     if (fotoCapa) urlCapa = URL.createObjectURL(fotoCapa);
+    fachadaAssinada = Boolean(imovel.fachada) && (await idsFotosAssinadas(id)).has(imovel.fachada.fotoId);
 
     capa.classList.toggle('capa-sem-foto', !fotoCapa);
     capa.innerHTML = `
@@ -268,6 +270,10 @@ export async function telaImovel(raiz, id, aba) {
     if (e.target.closest('#ver-fachada') && fotoCapa) {
       abrirTelaCheia(fotoCapa);
     } else if (e.target.closest('#botao-fachada')) {
+      if (fachadaAssinada) {
+        mostrarMensagem(FOTO_ASSINADA, 'erro');
+        return;
+      }
       if (imovel.fachada && !confirm('Trocar a foto da fachada? A atual será apagada.')) return;
       entradaFachada.click();
     }
@@ -297,15 +303,15 @@ export async function telaImovel(raiz, id, aba) {
   await desenharCapa();
 
   // ---------- abas ----------
+  // chamado quando a aba muda o imóvel (fachada apagada, situação "Vistoriado" ao assinar)
+  const aoMudarImovel = async () => {
+    imovel = await obterImovel(id);
+    await desenharCapa();
+  };
   if (abaAtual === 'ambientes') {
-    sairDaAba = await telaAmbientes(conteudo, imovel, {
-      mostrarEstado,
-      // chamado quando a foto da fachada é apagada lá dentro
-      aoMudarImovel: async () => {
-        imovel = await obterImovel(id);
-        await desenharCapa();
-      },
-    });
+    sairDaAba = await telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarImovel });
+  } else if (abaAtual === 'assinaturas') {
+    sairDaAba = await telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudarImovel });
   } else if (abaAtual !== 'dados') {
     conteudo.innerHTML = `<p class="vazio">${EM_BREVE[abaAtual]}</p>`;
   } else {

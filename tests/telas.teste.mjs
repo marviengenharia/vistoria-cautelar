@@ -138,6 +138,170 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   await page.waitForFunction(() => document.querySelector('#botao-fachada')?.textContent.trim() === 'Tirar foto da fachada');
   ok(true, 'excluir a foto da capa volta a pedir a foto da fachada');
 
+  // ---------- assinaturas ----------
+  const mensagemTem = (texto) => page.waitForFunction(
+    (t) => { const m = document.querySelector('#mensagem'); return !m.hidden && m.textContent.includes(t); },
+    { timeout: 10000 }, texto
+  );
+  const limparMensagem = () => page.$eval('#mensagem', (m) => { m.hidden = true; m.textContent = ''; });
+  const contarAssinaturas = (id) => page.evaluate(async (i) => (await (await import('/js/db.js')).listarAssinaturas(i)).length, id);
+  const resumoBloco = (bloco) => page.$eval(`details[data-bloco="${bloco}"] .bloco-resumo`, (s) => s.textContent);
+  const abrirBloco = async (bloco) => {
+    const sel = `details[data-bloco="${bloco}"]`;
+    if (!(await page.$eval(sel, (d) => d.open))) await page.click(`${sel} > summary`);
+  };
+  const assinar = async (bloco) => {
+    await abrirBloco(bloco);
+    const sel = `details[data-bloco="${bloco}"] .area-assinatura canvas`;
+    await page.waitForSelector(sel);
+    await page.$eval(sel, (c) => c.scrollIntoView({ block: 'center' }));
+    const caixa = await (await page.$(sel)).boundingBox();
+    const y = caixa.y + caixa.height / 2;
+    await page.mouse.move(caixa.x + 20, y);
+    await page.mouse.down();
+    await page.mouse.move(caixa.x + caixa.width - 20, y + 15, { steps: 15 });
+    await page.mouse.up();
+  };
+  const concluir = async () => {
+    await page.$eval('#concluir-assinaturas', (b) => b.scrollIntoView({ block: 'center' }));
+    await page.click('#concluir-assinaturas');
+  };
+
+  // sem fotos: não grava
+  await page.goto(base + '#/imovel/IM-002/assinaturas');
+  await page.waitForSelector('#concluir-assinaturas');
+  ok(await page.$$eval('details.bloco', (l) => l.length > 0 && l.every((d) => !d.open)), 'aba Assinaturas: blocos abrem fechados');
+  await concluir();
+  await mensagemTem('Não há fotos');
+  ok(await contarAssinaturas('IM-002') === 0, 'sem fotos: "Concluir assinaturas" avisa e não grava');
+
+  // IM-001: 2 fotos na sala
+  await limparMensagem();
+  await page.goto(base + '#/imovel/IM-001/assinaturas');
+  await page.waitForSelector('details[data-bloco="fotos"]');
+  ok(await resumoBloco('fotos') === '2 fotos em 1 ambiente', `resumo das fotos (${await resumoBloco('fotos')})`);
+  ok(await resumoBloco('morador') === 'Falta assinar', 'morador começa "Falta assinar"');
+  await abrirBloco('fotos');
+  ok(await page.$$eval('details[data-bloco="fotos"] .miniatura-foto', (l) => l.length) === 2
+    && !(await page.$('details[data-bloco="fotos"] .marca')), 'morador vê as 2 miniaturas, sem patologias');
+  await abrirBloco('morador');
+  await page.type('input[name="moradorNome"]', 'Maria Teste');
+  await page.type('input[name="moradorDocumento"]', '123');
+  ok((await page.$eval('details[data-bloco="morador"] .termo', (p) => p.textContent)).includes('as 2 fotos registradas'), 'termo de ciência na tela com o total de fotos');
+  await concluir();
+  await mensagemTem('assinatura do morador');
+  ok(await contarAssinaturas('IM-001') === 0, 'sem o traço do morador: não conclui');
+  await assinar('morador');
+  ok(await resumoBloco('morador') === 'Pronto para concluir', 'morador: "Pronto para concluir" depois do traço');
+  await page.click('details[data-bloco="morador"] > summary'); // fechar não perde o traço
+  await abrirBloco('vistoriador');
+  await page.type('input[name="vistoriadorNome"]', 'João Vistoriador');
+  await assinar('vistoriador');
+  await limparMensagem();
+  await concluir();
+  await page.waitForSelector('.assinatura-feita', { timeout: 10000 });
+  const feita = await page.$eval('.assinatura-feita', (s) => s.textContent);
+  ok(/Assinado em .* por Maria Teste/.test(feita) && feita.includes('2 fotos'), 'quadro "Assinado em … por Maria Teste · 2 fotos"');
+  ok(await page.$$eval('.assinatura-feita img', (l) => l.length) === 2, 'quadro mostra as duas assinaturas');
+  await page.waitForFunction(() => document.querySelector('.capa .selo')?.textContent === 'Vistoriado');
+  ok(true, 'selo da capa vira "Vistoriado"');
+  const gravada = await page.evaluate(async () => {
+    const db = await import('/js/db.js');
+    const [a] = await db.listarAssinaturas('IM-001');
+    const fotos = await db.listarFotosDoImovel('IM-001');
+    const larg = (await createImageBitmap(a.ocupante.assinatura)).width;
+    return {
+      tipo: a.tipo, nome: a.ocupante.nome, doc: a.ocupante.documento, larg,
+      inicio: a.inicio === fotos[0].tiradaEm, texto: a.texto, vist: await db.obterConfig('vistoriadorNome'),
+    };
+  });
+  ok(gravada.tipo === 'ciencia' && gravada.nome === 'Maria Teste' && gravada.doc === '123' && gravada.inicio
+    && gravada.texto.includes('as 2 fotos') && gravada.vist === 'João Vistoriador',
+  `assinatura de ciência gravada (${JSON.stringify(gravada)})`);
+  ok(gravada.larg > 320, `assinatura com a largura da tela (${gravada.larg} px)`);
+
+  // ambientes: cadeado, editor travado, foto nova "Depois da assinatura"
+  await page.goto(base + '#/imovel/IM-001/ambientes');
+  await page.waitForSelector('[data-ambiente]');
+  await page.click(`details[data-ambiente="${sala}"] > summary`);
+  ok(await page.$$eval(`details[data-ambiente="${sala}"] .marca-cadeado`, (l) => l.length) === 2, 'fotos assinadas com cadeado');
+  await page.click(`details[data-ambiente="${sala}"] .miniatura-foto`);
+  await page.waitForSelector('.editor-foto');
+  ok(!(await page.$('.editor-foto [data-editor="excluir"]')), 'foto assinada: sem "Excluir esta foto"');
+  const prova = await page.$eval('.editor-corpo', (p) => p.textContent);
+  ok(prova.includes('Assinada pelo morador em') && prova.includes('Entrou no app em'), `editor mostra a assinatura e a hora de entrada (${prova.replace(/\s+/g, ' ')})`);
+  await page.click('.editor-foto [data-editor="fechar"]');
+  await page.waitForFunction(() => !document.querySelector('.editor-foto'));
+  await limparMensagem();
+  await page.click(`details[data-ambiente="${sala}"] [data-acao="excluir-ambiente"]`);
+  await mensagemTem('foi assinada');
+  ok(Boolean(await page.$(`details[data-ambiente="${sala}"]`)), 'ambiente com foto assinada não é excluído (mostra o aviso)');
+
+  await page.click(`details[data-ambiente="${sala}"] [data-acao="galeria"]`);
+  await (await page.$('#entrada-galeria')).uploadFile(fixture('fachada.jpg'));
+  await page.waitForFunction((id) => document.querySelectorAll(`details[data-ambiente="${id}"] .miniatura-foto`).length === 3, { timeout: 20000 }, sala);
+  const depois = await page.$$eval(`details[data-ambiente="${sala}"] .marca-depois`, (l) => l.map((m) => m.textContent));
+  ok(depois.join() === 'Depois da assinatura', `foto nova marcada "Depois da assinatura" (${depois})`);
+  await page.click(`details[data-ambiente="${sala}"] .miniatura-foto:has(.marca-depois)`);
+  await page.waitForSelector('.editor-foto [data-editor="excluir"]');
+  await page.click('.editor-foto [data-editor="excluir"]');
+  await page.waitForFunction((id) => document.querySelectorAll(`details[data-ambiente="${id}"] .miniatura-foto`).length === 2, { timeout: 10000 }, sala);
+  ok(true, 'foto nova (não assinada) pode ser excluída');
+
+  // nova assinatura: a anterior vai para o histórico
+  await page.goto(base + '#/imovel/IM-001/assinaturas');
+  await page.waitForSelector('#nova-assinatura');
+  await page.click('#nova-assinatura');
+  await page.waitForSelector('#concluir-assinaturas');
+  ok((await page.$eval('#conteudo-aba', (c) => c.textContent)).includes('fica guardada'), '"Colher nova assinatura" avisa que a anterior fica guardada');
+  ok(await page.$eval('input[name="vistoriadorNome"]', (i) => i.value) === 'João Vistoriador', 'nome do vistoriador lembrado');
+  await abrirBloco('morador');
+  await page.type('input[name="moradorNome"]', 'Maria Teste');
+  await assinar('morador');
+  await assinar('vistoriador');
+  await concluir();
+  await page.waitForSelector('.assinatura-feita');
+  ok(await contarAssinaturas('IM-001') === 2 && await page.$$eval('.historico-item', (l) => l.length) === 1,
+    'nova assinatura gravada; a anterior aparece no histórico');
+
+  // IM-003 recusado: fachada, motivo e testemunha
+  await page.goto(base + '#/imovel/IM-003/dados');
+  await page.waitForSelector('#form-dados');
+  await (await page.$('#entrada-fachada')).uploadFile(fixture('fachada.jpg'));
+  await page.waitForSelector('#ver-fachada img', { timeout: 15000 });
+  await page.click('details[data-bloco="situacao"] > summary');
+  await page.click('input[name="status"][value="recusado"] + span');
+  await page.waitForSelector('textarea[name="recusaMotivo"]', { visible: true });
+  await page.type('textarea[name="recusaMotivo"]', 'Não quis receber');
+  await page.type('input[name="recusaTestemunha"]', 'José Vizinho');
+  ok((await page.$eval('[data-so-se-recusado]', (d) => d.textContent)).includes('O Termo de Recusa é assinado na aba Assinaturas.'), 'ajuda da recusa aponta a aba Assinaturas');
+  await esperar(700);
+  await page.goto(base + '#/imovel/IM-003/assinaturas');
+  await page.waitForSelector('details[data-bloco="recusa"]');
+  ok((await page.$$eval('details.bloco', (l) => l.map((d) => d.dataset.bloco))).join() === 'recusa,testemunha,vistoriador', 'recusa: blocos recusa, testemunha e vistoriador');
+  ok(await resumoBloco('recusa') === 'Não quis receber', `bloco Recusa mostra o motivo (${await resumoBloco('recusa')})`);
+  await abrirBloco('testemunha');
+  ok(await page.$eval('input[name="testemunhaNome"]', (i) => i.value) === 'José Vizinho', 'nome da testemunha vem dos Dados');
+  await assinar('vistoriador');
+  await limparMensagem();
+  await concluir();
+  await mensagemTem('assinatura da testemunha');
+  ok(await contarAssinaturas('IM-003') === 0, 'recusa sem o traço da testemunha: não conclui');
+  await assinar('testemunha');
+  await concluir();
+  await page.waitForSelector('.assinatura-feita', { timeout: 10000 });
+  const recusa = await page.evaluate(async () => {
+    const [a] = await (await import('/js/db.js')).listarAssinaturas('IM-003');
+    return { tipo: a.tipo, motivo: a.motivoRecusa, testemunha: a.testemunha.nome, fotos: a.fotos.length, ocupante: a.ocupante ?? null };
+  });
+  ok(recusa.tipo === 'recusa' && recusa.motivo === 'Não quis receber' && recusa.testemunha === 'José Vizinho'
+    && recusa.fotos === 1 && recusa.ocupante === null, `termo de recusa gravado (${JSON.stringify(recusa)})`);
+  ok(await page.$eval('.capa .selo', (s) => s.textContent) === 'Recusado', 'recusa mantém a situação "Recusado"');
+  await limparMensagem();
+  await page.click('#botao-fachada');
+  await mensagemTem('foi assinada');
+  ok(true, 'fachada assinada: "Trocar foto" mostra o aviso');
+
   // ---------- sem internet ----------
   await pararServidor();
   await page.goto(base + '#/');
@@ -146,4 +310,7 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   await page.goto(base + '#/imovel/IM-001/ambientes');
   await page.waitForSelector('[data-ambiente]', { timeout: 10000 });
   ok((await page.$$('.miniatura-foto')).length === 2, 'SEM SERVIDOR: fotos da sala continuam lá');
+  await page.goto(base + '#/imovel/IM-001/assinaturas');
+  await page.waitForSelector('.assinatura-feita', { timeout: 10000 });
+  ok(true, 'SEM SERVIDOR: aba Assinaturas abre');
 }
