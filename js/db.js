@@ -1,14 +1,15 @@
 // Banco de dados do app (IndexedDB, fica só no aparelho).
 import { openDB } from '../vendor/idb/index.js';
-import { imovelVazio, NOME_AMBIENTE_FACHADA } from './dominio.js';
+import { imovelVazio, NOME_AMBIENTE_FACHADA, FOTO_ASSINADA } from './dominio.js';
+import { impressaoDigital } from './foto.js';
 
 const NOME_BANCO = 'vistoria-cautelar';
-const VERSAO_BANCO = 2;
+const VERSAO_BANCO = 3;
 
 // Ao criar novas tabelas, aumentar VERSAO_BANCO e acrescentar um bloco
 // "if (versaoAntiga < N)" — nunca alterar os blocos anteriores (o celular já tem dados).
 const bancoPronto = openDB(NOME_BANCO, VERSAO_BANCO, {
-  upgrade(db, versaoAntiga) {
+  async upgrade(db, versaoAntiga, novaVersao, transaction) {
     if (versaoAntiga < 1) {
       const imoveis = db.createObjectStore('imoveis', { keyPath: 'id' });
       imoveis.createIndex('status', 'status');
@@ -20,6 +21,17 @@ const bancoPronto = openDB(NOME_BANCO, VERSAO_BANCO, {
       const fotos = db.createObjectStore('fotos', { keyPath: 'id' });
       fotos.createIndex('imovelId', 'imovelId');
       fotos.createIndex('ambienteId', 'ambienteId');
+    }
+    if (versaoAntiga < 3) {
+      const assinaturas = db.createObjectStore('assinaturas', { keyPath: 'id' });
+      assinaturas.createIndex('imovelId', 'imovelId');
+      // fotos antigas: a hora de entrada no app é desconhecida, vale a hora da foto
+      const fotos = transaction.objectStore('fotos');
+      for (let c = await fotos.openCursor(); c; c = await c.continue()) {
+        if (!c.value.entrouEm) {
+          await c.update({ ...c.value, entrouEm: c.value.tiradaEm, origemHora: 'app' });
+        }
+      }
     }
   },
   blocked() {
@@ -78,8 +90,8 @@ export async function atualizarImovel(id, alteracoes) {
 /** Apaga o imóvel com todos os ambientes e fotos dele. */
 export async function excluirImovel(id) {
   const db = await bancoPronto;
-  const tx = db.transaction(['imoveis', 'ambientes', 'fotos'], 'readwrite');
-  for (const nome of ['fotos', 'ambientes']) {
+  const tx = db.transaction(['imoveis', 'ambientes', 'fotos', 'assinaturas'], 'readwrite');
+  for (const nome of ['fotos', 'ambientes', 'assinaturas']) {
     const indice = tx.objectStore(nome).index('imovelId');
     for (let c = await indice.openCursor(id); c; c = await c.continue()) await c.delete();
   }
@@ -105,9 +117,12 @@ export async function criarAmbiente(imovelId, nome) {
 /** Apaga o ambiente e as fotos dele (se a fachada estiver entre elas, o imóvel fica sem fachada). */
 export async function excluirAmbiente(ambienteId) {
   const db = await bancoPronto;
-  const tx = db.transaction(['imoveis', 'ambientes', 'fotos'], 'readwrite');
+  const tx = db.transaction(['imoveis', 'ambientes', 'fotos', 'assinaturas'], 'readwrite');
   const ambiente = await tx.objectStore('ambientes').get(ambienteId);
   if (!ambiente) return;
+  const assinadas = await idsAssinadasNaTransacao(tx, ambiente.imovelId);
+  const doAmbiente = await tx.objectStore('fotos').index('ambienteId').getAll(ambienteId);
+  if (doAmbiente.some((f) => assinadas.has(f.id))) throw new Error(FOTO_ASSINADA);
   const imoveis = tx.objectStore('imoveis');
   const imovel = await imoveis.get(ambiente.imovelId);
   const indice = tx.objectStore('fotos').index('ambienteId');
@@ -125,7 +140,14 @@ export async function excluirAmbiente(ambienteId) {
 
 // ===================== fotos =====================
 
-function registroFoto(imovelId, ambienteId, { foto, miniatura, hash }) {
+/** Ids das fotos que constam em alguma assinatura do imóvel (dentro de uma transação). */
+async function idsAssinadasNaTransacao(tx, imovelId) {
+  const lista = await tx.objectStore('assinaturas').index('imovelId').getAll(imovelId);
+  return new Set(lista.flatMap((a) => a.fotos.map((f) => f.id)));
+}
+
+function registroFoto(imovelId, ambienteId, { foto, miniatura, hash, tiradaEm, origemHora }) {
+  const entrouEm = agora();
   return {
     id: novoId('FOTO'),
     imovelId,
@@ -133,7 +155,9 @@ function registroFoto(imovelId, ambienteId, { foto, miniatura, hash }) {
     blob: foto,
     miniatura,
     hash,             // SHA-256 da foto gravada (prova de que não foi alterada)
-    tiradaEm: agora(),
+    tiradaEm: tiradaEm ?? entrouEm, // hora em que a foto foi feita
+    entrouEm,                       // hora em que entrou no app
+    origemHora: origemHora ?? 'app', // 'exif' | 'arquivo' | 'app'
     patologias: [],   // valores de PATOLOGIAS, ou [SEM_PATOLOGIA]
     local: '',        // valor de LOCAIS_FOTO
     abertura: null,   // mm, quando medida com fissurômetro
@@ -174,9 +198,10 @@ export async function atualizarFoto(id, alteracoes) {
 
 export async function excluirFoto(id) {
   const db = await bancoPronto;
-  const tx = db.transaction(['imoveis', 'fotos'], 'readwrite');
+  const tx = db.transaction(['imoveis', 'fotos', 'assinaturas'], 'readwrite');
   const foto = await tx.objectStore('fotos').get(id);
   if (foto) {
+    if ((await idsAssinadasNaTransacao(tx, foto.imovelId)).has(id)) throw new Error(FOTO_ASSINADA);
     const imoveis = tx.objectStore('imoveis');
     const imovel = await imoveis.get(foto.imovelId);
     if (imovel?.fachada?.fotoId === id) {
@@ -196,7 +221,7 @@ export async function excluirFoto(id) {
  */
 export async function definirFachada(imovelId, processada) {
   const db = await bancoPronto;
-  const tx = db.transaction(['imoveis', 'ambientes', 'fotos'], 'readwrite');
+  const tx = db.transaction(['imoveis', 'ambientes', 'fotos', 'assinaturas'], 'readwrite');
   const imoveis = tx.objectStore('imoveis');
   const fotos = tx.objectStore('fotos');
   const ambientes = tx.objectStore('ambientes');
@@ -211,6 +236,9 @@ export async function definirFachada(imovelId, processada) {
     await ambientes.add(ambiente);
   }
 
+  if (imovel.fachada?.fotoId && (await idsAssinadasNaTransacao(tx, imovelId)).has(imovel.fachada.fotoId)) {
+    throw new Error(FOTO_ASSINADA);
+  }
   if (imovel.fachada?.fotoId) await fotos.delete(imovel.fachada.fotoId);
   const registro = registroFoto(imovelId, ambiente.id, processada);
   registro.local = 'fachada';
@@ -224,6 +252,75 @@ export async function definirFachada(imovelId, processada) {
   await imoveis.put(novo);
   await tx.done;
   return novo;
+}
+
+export async function listarFotosDoImovel(imovelId) {
+  const db = await bancoPronto;
+  const lista = await db.getAllFromIndex('fotos', 'imovelId', imovelId);
+  return lista.sort((a, b) => a.tiradaEm.localeCompare(b.tiradaEm));
+}
+
+// ===================== configuração =====================
+
+export async function obterConfig(chave) {
+  const db = await bancoPronto;
+  return db.get('config', chave);
+}
+
+export async function gravarConfig(chave, valor) {
+  const db = await bancoPronto;
+  await db.put('config', valor, chave);
+}
+
+// ===================== assinaturas =====================
+
+/**
+ * Grava uma assinatura (ciência ou recusa) com a lista das fotos do imóvel nesse momento.
+ * O `codigo` é o SHA-256 do conteúdo; cada imagem de assinatura entra pelo próprio SHA-256.
+ */
+export async function gravarAssinatura(imovelId, dados) {
+  const db = await bancoPronto;
+  const fotos = (await listarFotosDoImovel(imovelId)).map((f) => ({ id: f.id, hash: f.hash }));
+  const assinadoEm = agora();
+  const id = novoId('ASS');
+
+  const resumir = async (pessoa) => (pessoa ? { ...pessoa, assinatura: await impressaoDigital(pessoa.assinatura) } : null);
+  const paraCodigo = {
+    id, imovelId, assinadoEm, fotos,
+    tipo: dados.tipo,
+    texto: dados.texto,
+    inicio: dados.inicio,
+    ocupante: await resumir(dados.ocupante),
+    testemunha: await resumir(dados.testemunha),
+    vistoriador: await resumir(dados.vistoriador),
+    motivoRecusa: dados.motivoRecusa ?? null,
+  };
+  const codigo = await impressaoDigital(new Blob([JSON.stringify(paraCodigo)]));
+  const assinatura = { id, imovelId, assinadoEm, fotos, ...dados, codigo };
+
+  const tx = db.transaction(['assinaturas', 'imoveis'], 'readwrite');
+  await tx.objectStore('assinaturas').add(assinatura);
+  if (dados.tipo === 'ciencia') {
+    const imovel = await tx.objectStore('imoveis').get(imovelId);
+    if (imovel && ['pendente', 'ausente', 'revisitar'].includes(imovel.status)) {
+      await tx.objectStore('imoveis').put({ ...imovel, status: 'vistoriado', atualizadoEm: agora() });
+    }
+  }
+  await tx.done;
+  return assinatura;
+}
+
+/** Assinaturas do imóvel, a mais nova primeiro. */
+export async function listarAssinaturas(imovelId) {
+  const db = await bancoPronto;
+  const lista = await db.getAllFromIndex('assinaturas', 'imovelId', imovelId);
+  return lista.sort((a, b) => b.assinadoEm.localeCompare(a.assinadoEm));
+}
+
+/** Ids das fotos que já constam em alguma assinatura do imóvel. */
+export async function idsFotosAssinadas(imovelId) {
+  const lista = await listarAssinaturas(imovelId);
+  return new Set(lista.flatMap((a) => a.fotos.map((f) => f.id)));
 }
 
 /** Pede ao navegador para não apagar os dados quando faltar espaço. */

@@ -163,3 +163,22 @@ export function imovelVazio(id) {
     atualizadoEm: agora,
   };
 }
+
+export const FOTO_ASSINADA = 'Esta foto foi assinada pelo morador e não pode ser apagada.';
+
+const dataBr = (d) => [
+  String(d.getDate()).padStart(2, '0'),
+  String(d.getMonth() + 1).padStart(2, '0'),
+  d.getFullYear(),
+].join('/');
+
+/** Texto do termo de ciência (rascunho, a revisar pela Raquel/jurídico). */
+export function textoTermoCiencia({ id, data, totalFotos }) {
+  const fotos = totalFotos === 1 ? 'a 1 foto registrada mostra' : `as ${totalFotos} fotos registradas mostram`;
+  return `Declaro que acompanhei a vistoria cautelar do meu imóvel (${id}) em ${dataBr(data)} e que ${fotos} o estado do imóvel nesta data.`;
+}
+
+/** Texto do termo de recusa (rascunho, a revisar pela Raquel/jurídico). */
+export function textoTermoRecusa({ id, data, motivo }) {
+  return `Declaro que presenciei, em ${dataBr(data)}, a recusa do ocupante do imóvel ${id} em permitir a vistoria cautelar. Motivo informado: ${motivo}.`;
+}

@@ -77,7 +77,7 @@ export default async function ({ page, base, ok }) {
     return out;
   });
 
-  ok(r.versao === 2, `banco atualizado para a versão 2 (${r.versao})`);
+  ok(r.versao === 3, `banco atualizado para a versão 3 (${r.versao})`);
   ok(['ambientes', 'fotos', 'imoveis', 'config'].every((d) => r.depositos.includes(d)), `depósitos: ${r.depositos}`);
   ok(r.novoId === 'IM-002', `numeração continua depois da migração (${r.novoId})`);
   ok(r.ambientesAposFachada.join() === 'Fachada', 'foto da fachada cria o ambiente "Fachada"');
