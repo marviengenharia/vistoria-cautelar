@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prévia do layout — Vistoria cautelar</title>
+<!-- Só na prévia: a fonte vem do Google Fonts. No app ela fica dentro do projeto (funciona sem internet). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --papel: #ffffff;
+    --papel-2: #f0f1f2;
+    --tinta: #000000;
+    --tinta-2: #4a4f55;
+    --linha: #8a9096;
+    --asfalto: #262b30;
+    --faixa: #ffffff;
+    --cone: #f26a1b;
+    --cone-tinta: #000000;
+    --st-pendente: #6b7177;
+    --st-vistoriado: #1a7f37;
+    --st-recusado: #c62828;
+    --st-ausente: #ffc20e;
+    --st-revisitar: #ffc20e;
+    --texto: "Barlow", system-ui, sans-serif;
+    --numero: "Barlow Condensed", "Barlow", system-ui, sans-serif;
+  }
+  .escuro {
+    --papel: #000000;
+    --papel-2: #17191c;
+    --tinta: #ffffff;
+    --tinta-2: #c3c7cb;
+    --linha: #7d838a;
+    --asfalto: #2f353b;
+    --cone: #ff8a3d;
+    --st-pendente: #a3a9ae;
+    --st-vistoriado: #4cc76f;
+    --st-recusado: #ff6b62;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #d9dcdf; color: #000; font: 16px/1.4 var(--texto);
+  }
+  .moldura-pagina { max-width: 1320px; margin: 0 auto; padding: 24px 16px 48px; }
+  .moldura-pagina > h1 { font: 700 26px var(--texto); margin: 0 0 4px; }
+  .moldura-pagina > p { margin: 0 0 24px; color: #33383d; max-width: 70ch; }
+  .telas { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { font: 600 15px var(--texto); margin-top: 10px; color: #33383d; }
+
+  .celular {
+    width: 390px; height: 844px; overflow: hidden auto; position: relative;
+    background: var(--papel); color: var(--tinta);
+    border: 10px solid #1b1e21; border-radius: 36px;
+    font: 18px/1.35 var(--texto);
+    scrollbar-width: none;
+  }
+  .celular::-webkit-scrollbar { display: none; }
+
+  /* ---------- topo da lista ---------- */
+  .topo {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--asfalto); color: #fff; padding: 18px 16px 14px;
+  }
+  .topo-linha { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .topo h2 { margin: 0; font: 700 22px var(--texto); }
+  .placar { font: 700 30px/1 var(--numero); }
+  .placar small { font: 600 16px var(--texto); opacity: .8; }
+  /* barra com a proporção de cada situação */
+  .andamento { display: flex; height: 10px; margin-top: 12px; background: #4b5258; border-radius: 2px; overflow: hidden; }
+  .andamento i { display: block; height: 100%; }
+
+  .ferramentas { padding: 14px 16px 6px; }
+  .busca {
+    width: 100%; height: 54px; padding: 0 14px; font: 500 18px var(--texto);
+    border: 2px solid var(--tinta); border-radius: 8px; background: var(--papel); color: var(--tinta);
+  }
+  .filtros { display: flex; gap: 8px; overflow-x: auto; padding: 12px 16px; scrollbar-width: none; }
+  .filtro {
+    flex: none; height: 44px; padding: 0 14px; border-radius: 22px;
+    border: 2px solid var(--linha); background: var(--papel); color: var(--tinta);
+    font: 600 16px var(--texto); display: inline-flex; align-items: center; gap: 6px;
+  }
+  .filtro b { font: 700 18px var(--numero); }
+  .filtro.ativo { background: var(--tinta); color: var(--papel); border-color: var(--tinta); }
+
+  /* ---------- sem estaca ---------- */
+  .grupo-titulo { font: 700 17px var(--texto); margin: 8px 16px 8px; }
+  .linha-imovel {
+    display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: center;
+    margin: 0 16px 10px; padding: 8px; border: 2px solid var(--linha); border-radius: 8px;
+    border-left: 8px solid var(--st);
+  }
+  .linha-imovel img { width: 72px; height: 54px; object-fit: cover; border-radius: 4px; display: block; }
+  .linha-imovel .sem-foto { width: 72px; height: 54px; }
+
+  /* ---------- a avenida ---------- */
+  .avenida-cabecalho {
+    display: grid; grid-template-columns: 1fr 44px 1fr; align-items: end;
+    margin: 18px 12px 0; font: 700 15px var(--texto); color: var(--tinta-2);
+  }
+  .avenida-cabecalho span:last-child { text-align: right; }
+  .avenida { position: relative; margin: 6px 12px 0; padding-bottom: 110px; }
+  /* a pista: faixa de asfalto com a linha tracejada no meio */
+  .avenida::before {
+    content: ""; position: absolute; top: 0; bottom: 70px; left: 50%; width: 44px; transform: translateX(-50%);
+    background:
+      linear-gradient(var(--faixa) 50%, transparent 0) center / 4px 22px repeat-y,
+      var(--asfalto);
+  }
+  .trecho { position: relative; display: grid; grid-template-columns: 1fr 44px 1fr; align-items: start; padding: 10px 0; }
+  .estaca {
+    grid-column: 2; justify-self: center; z-index: 1;
+    background: var(--papel); color: var(--tinta); border: 2px solid var(--tinta); border-radius: 4px;
+    font: 700 17px/1 var(--numero); padding: 4px 3px; min-width: 40px; text-align: center;
+  }
+  .lado { display: grid; gap: 10px; }
+  .lado.le { grid-column: 1; grid-row: 1; padding-right: 6px; }
+  .lado.ld { grid-column: 3; grid-row: 1; padding-left: 6px; }
+
+  .cartao {
+    background: var(--papel); border: 2px solid var(--linha); border-radius: 8px; overflow: hidden;
+  }
+  .cartao img, .cartao .sem-foto { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+  .cartao-texto { padding: 6px 8px 8px; border-top: 6px solid var(--st); }
+  .cartao-id { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+  .num { font: 700 21px/1 var(--numero); letter-spacing: .01em; }
+  .situacao { font: 700 13px var(--texto); color: var(--tinta-2); }
+  .endereco {
+    font: 500 15px/1.25 var(--texto); margin-top: 3px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .sem-foto { background: var(--papel-2); display: grid; place-items: center; color: var(--linha); }
+  .sem-foto svg { width: 42%; height: auto; }
+
+  .st-pendente { --st: var(--st-pendente); }
+  .st-vistoriado { --st: var(--st-vistoriado); }
+  .st-recusado { --st: var(--st-recusado); }
+  .st-ausente, .st-revisitar { --st: var(--st-ausente); }
+
+  .botao-novo {
+    position: sticky; bottom: 18px; display: block; margin: -84px 16px 0 auto; z-index: 6;
+    height: 64px; padding: 0 26px; border: 3px solid #000; border-radius: 8px;
+    background: var(--cone); color: var(--cone-tinta); font: 700 21px var(--texto);
+    box-shadow: 0 3px 0 #000;
+  }
+
+  /* ---------- tela do imóvel ---------- */
+  .capa { position: relative; height: 270px; background: #333; }
+  .capa img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .capa::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(transparent 40%, rgba(0,0,0,.85));
+  }
+  .capa-topo { position: absolute; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; z-index: 1; }
+  .voltar, .salvo {
+    height: 44px; padding: 0 14px; border-radius: 22px; border: 0;
+    background: rgba(255,255,255,.95); color: #000; font: 700 16px var(--texto);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .salvo::before { content: "✓"; color: var(--st-vistoriado); font-weight: 800; }
+  .capa-texto { position: absolute; left: 16px; right: 16px; bottom: 14px; color: #fff; z-index: 1; }
+  .capa-texto .num { font-size: 40px; }
+  .capa-texto p { margin: 2px 0 0; font: 600 17px var(--texto); }
+  .selo {
+    display: inline-block; margin-left: 10px; vertical-align: 8px;
+    font: 700 14px var(--texto); padding: 4px 10px; border-radius: 4px; background: var(--st); color: #fff;
+  }
+  .selo.st-ausente, .selo.st-revisitar { color: #000; }
+  .trocar-foto {
+    position: absolute; right: 14px; bottom: 16px; z-index: 1;
+    height: 44px; padding: 0 14px; border-radius: 8px; border: 2px solid #fff;
+    background: rgba(0,0,0,.4); color: #fff; font: 600 15px var(--texto);
+  }
+
+  .abas { display: flex; border-bottom: 2px solid var(--linha); position: sticky; top: 0; background: var(--papel); z-index: 4; }
+  .abas a { flex: 1; text-align: center; padding: 14px 4px 12px; font: 600 16px var(--texto); color: var(--tinta-2); text-decoration: none; border-bottom: 5px solid transparent; }
+  .abas a.atual { color: var(--tinta); border-bottom-color: var(--cone); }
+
+  .blocos { padding: 14px 14px 40px; display: grid; gap: 10px; }
+  .bloco { border: 2px solid var(--linha); border-radius: 8px; }
+  .bloco.aberto { border-color: var(--tinta); }
+  .bloco-cab { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 12px 14px; align-items: center; }
+  .bloco-cab h3 { margin: 0; font: 700 19px var(--texto); }
+  .bloco-cab p { grid-column: 1; margin: 0; font: 500 15px var(--texto); color: var(--tinta-2); }
+  .bloco-cab p.falta { font-style: italic; }
+  .bloco-cab .sinal { grid-column: 2; grid-row: 1 / span 2; font: 700 28px var(--texto); }
+  .bloco-corpo { padding: 2px 14px 14px; border-top: 2px solid var(--papel-2); }
+  .rotulo { display: block; font: 700 17px var(--texto); margin: 14px 0 6px; }
+  .opcoes { display: flex; flex-wrap: wrap; gap: 8px; }
+  .opcao { height: 50px; padding: 0 14px; border: 2px solid var(--linha); border-radius: 8px; display: inline-flex; align-items: center; font: 600 17px var(--texto); }
+  .opcao.marcada { background: var(--tinta); color: var(--papel); border-color: var(--tinta); }
+  .opcao.marcada::before { content: "✓\00a0"; }
+  .entrada { height: 54px; border: 2px solid var(--linha); border-radius: 8px; padding: 0 12px; display: flex; align-items: center; font: 500 18px var(--texto); }
+  .mais-menos { display: flex; gap: 8px; }
+  .mais-menos span { width: 54px; height: 54px; border: 2px solid var(--tinta); border-radius: 8px; display: grid; place-items: center; font: 700 28px var(--texto); background: var(--papel-2); }
+  .mais-menos b { width: 90px; height: 54px; border: 2px solid var(--linha); border-radius: 8px; display: grid; place-items: center; font: 700 26px var(--numero); }
+  .ok {
+    margin-top: 18px; width: 100%; height: 56px; border: 3px solid #000; border-radius: 8px;
+    background: var(--cone); color: #000; font: 700 19px var(--texto); box-shadow: 0 3px 0 #000;
+  }
+</style>
+</head>
+<body>
+<div class="moldura-pagina">
+  <h1>Prévia do layout novo</h1>
+  <p>Dados e fotos de exemplo (as fachadas são desenhos). A rolagem funciona dentro de cada celular.</p>
+  <div class="telas">
+    <figure><div class="celular" id="lista-clara"></div><figcaption>Lista: a avenida, com LE e LD</figcaption></figure>
+    <figure><div class="celular" id="imovel"></div><figcaption>Imóvel: fachada no topo</figcaption></figure>
+    <figure><div class="celular escuro" id="lista-escura"></div><figcaption>Lista no modo escuro</figcaption></figure>
+  </div>
+</div>
+
+<script>
+// ---------- fachadas de exemplo (desenhos) ----------
+const PAREDES = ['#e9c46a', '#8ecae6', '#f4a261', '#b5e48c', '#f1f1f1', '#cdb4db', '#ffafcc', '#a8dadc'];
+function fachada(n, pav = 1) {
+  const parede = PAREDES[n % PAREDES.length];
+  const alto = pav === 2;
+  const topo = alto ? 40 : 95;
+  const janelas = alto
+    ? `<rect x="60" y="70" width="60" height="45" fill="#2b3a4a"/><rect x="200" y="70" width="60" height="45" fill="#2b3a4a"/>`
+    : '';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+    <rect width="320" height="240" fill="#bfd9ea"/>
+    <rect y="200" width="320" height="40" fill="#9a9a94"/>
+    <polygon points="20,${topo} 160,${topo - 35} 300,${topo}" fill="#7a3b2e"/>
+    <rect x="35" y="${topo}" width="250" height="${205 - topo}" fill="${parede}"/>
+    ${janelas}
+    <rect x="${n % 2 ? 60 : 200}" y="140" width="60" height="45" fill="#2b3a4a"/>
+    <rect x="${n % 2 ? 190 : 75}" y="135" width="48" height="70" fill="#5b3a29"/>
+    <rect x="0" y="200" width="320" height="6" fill="#6f6f69"/>
+  </svg>`;
+  return 'data:image/svg+xml,' + encodeURIComponent(svg);
+}
+const CASINHA = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+  <path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>`;
+
+const SITUACAO = { pendente: 'Pendente', vistoriado: 'Feito', recusado: 'Recusado', ausente: 'Ausente', revisitar: 'Revisitar' };
+const IMOVEIS = [
+  { id: 'IM-041', end: 'Rua Nova, sem número', estaca: null, lado: null, st: 'pendente', foto: false },
+  { id: 'IM-004', end: 'Passagem Mirim, 112', estaca: 30, lado: 'LE', st: 'vistoriado', pav: 2 },
+  { id: 'IM-007', end: 'Av. Bernardo Sayão, 2210', estaca: 30, lado: 'LD', st: 'pendente' },
+  { id: 'IM-005', end: 'Passagem Mirim, 118', estaca: 31, lado: 'LE', st: 'recusado' },
+  { id: 'IM-009', end: 'Av. Bernardo Sayão, 2234', estaca: 31, lado: 'LD', st: 'ausente', pav: 2 },
+  { id: 'IM-010', end: 'Av. Bernardo Sayão, 2250', estaca: 31, lado: 'LD', st: 'vistoriado' },
+  { id: 'IM-006', end: 'Travessa das Flores, 15', estaca: 32, lado: 'LE', st: 'pendente', foto: false },
+  { id: 'IM-011', end: 'Av. Bernardo Sayão, 2290', estaca: 33, lado: 'LD', st: 'revisitar' },
+  { id: 'IM-012', end: 'Passagem Mirim, 140', estaca: 33, lado: 'LE', st: 'vistoriado', pav: 2 },
+];
+
+const foto = (im, i) => im.foto === false
+  ? `<div class="sem-foto">${CASINHA}</div>`
+  : `<img src="${fachada(i, im.pav)}" alt="">`;
+
+function cartao(im, i) {
+  return `<article class="cartao st-${im.st}">${foto(im, i)}
+    <div class="cartao-texto">
+      <div class="cartao-id"><span class="num">${im.id}</span><span class="situacao">${SITUACAO[im.st]}</span></div>
+      <div class="endereco">${im.end}</div>
+    </div></article>`;
+}
+
+function lista() {
+  const total = 40, cont = { vistoriado: 12, recusado: 2, ausente: 3, revisitar: 1 };
+  cont.pendente = total - 18;
+  const barra = ['vistoriado', 'recusado', 'ausente', 'revisitar']
+    .map((s) => `<i style="width:${cont[s] / total * 100}%;background:var(--st-${s})"></i>`).join('');
+  const semEstaca = IMOVEIS.filter((im) => !im.estaca);
+  const estacas = [...new Set(IMOVEIS.filter((im) => im.estaca).map((im) => im.estaca))].sort((a, b) => a - b);
+  const trechos = estacas.map((e) => {
+    const lado = (l) => IMOVEIS.map((im, i) => [im, i]).filter(([im]) => im.estaca === e && im.lado === l)
+      .map(([im, i]) => cartao(im, i)).join('');
+    return `<div class="trecho"><span class="estaca">E${e}</span>
+      <div class="lado le">${lado('LE')}</div><div class="lado ld">${lado('LD')}</div></div>`;
+  }).join('');
+  return `
+    <header class="topo">
+      <div class="topo-linha"><h2>Vistoria cautelar</h2><span class="placar">12 <small>de 40 feitos</small></span></div>
+      <div class="andamento">${barra}</div>
+    </header>
+    <div class="ferramentas"><input class="busca" placeholder="Buscar casa, rua ou nome"></div>
+    <div class="filtros">
+      <span class="filtro ativo">Todos <b>40</b></span>
+      <span class="filtro">Pendentes <b>22</b></span>
+      <span class="filtro">Feitos <b>12</b></span>
+      <span class="filtro">Recusados <b>2</b></span>
+      <span class="filtro">Ausentes <b>3</b></span>
+    </div>
+    <h3 class="grupo-titulo">Sem estaca ainda</h3>
+    ${semEstaca.map((im) => `<div class="linha-imovel st-${im.st}">${foto(im, 0)}
+      <div><div class="cartao-id"><span class="num">${im.id}</span><span class="situacao">${SITUACAO[im.st]}</span></div>
+      <div class="endereco">${im.end}</div></div></div>`).join('')}
+    <div class="avenida-cabecalho"><span>Lado esquerdo</span><span></span><span>Lado direito</span></div>
+    <div class="avenida">${trechos}</div>
+    <button class="botao-novo">+ Imóvel</button>`;
+}
+
+function imovel() {
+  return `
+    <div class="capa"><img src="${fachada(1, 2)}" alt="">
+      <div class="capa-topo"><button class="voltar">‹ Imóveis</button><span class="salvo">Salvo</span></div>
+      <div class="capa-texto"><span class="num">IM-004</span><span class="selo st-vistoriado">Feito</span>
+        <p>Estaca 30, lado esquerdo</p></div>
+      <button class="trocar-foto">Trocar foto</button>
+    </div>
+    <nav class="abas"><a class="atual">Dados</a><a>Ambientes</a><a>Assinaturas</a><a>Laudo</a></nav>
+    <div class="blocos">
+      <section class="bloco"><div class="bloco-cab"><h3>Situação</h3><p>Vistoria feita em 18/11 às 9h40</p><span class="sinal">+</span></div></section>
+      <section class="bloco"><div class="bloco-cab"><h3>Localização</h3><p>Passagem Mirim, 112. GPS preciso (6 m)</p><span class="sinal">+</span></div></section>
+      <section class="bloco"><div class="bloco-cab"><h3>Ocupante</h3><p>Proprietária, telefone anotado</p><span class="sinal">+</span></div></section>
+      <section class="bloco aberto">
+        <div class="bloco-cab"><h3>Características</h3><p>Residencial de 2 pavimentos, concreto armado</p><span class="sinal">−</span></div>
+        <div class="bloco-corpo">
+          <span class="rotulo">Uso</span>
+          <div class="opcoes"><span class="opcao marcada">Residencial</span><span class="opcao">Comercial</span><span class="opcao">Misto</span><span class="opcao">Institucional</span></div>
+          <span class="rotulo">Nº de pavimentos</span>
+          <div class="mais-menos"><span>−</span><b>2</b><span>+</span></div>
+          <span class="rotulo">Estrutura</span>
+          <div class="entrada">Concreto armado</div>
+          <span class="rotulo">Estado de conservação</span>
+          <div class="opcoes"><span class="opcao">Bom</span><span class="opcao marcada">Regular</span><span class="opcao">Precário</span><span class="opcao">Ruim</span></div>
+          <button class="ok">OK, próximo</button>
+        </div>
+      </section>
+      <section class="bloco"><div class="bloco-cab"><h3>Observações</h3><p class="falta">Falta preencher</p><span class="sinal">+</span></div></section>
+    </div>`;
+}
+
+document.getElementById('lista-clara').innerHTML = lista();
+document.getElementById('lista-escura').innerHTML = lista();
+document.getElementById('imovel').innerHTML = imovel();
+</script>
+</body>
+</html>

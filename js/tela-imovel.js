@@ -1,12 +1,18 @@
-// Tela do imóvel: abas Dados → Ambientes → Assinaturas → Laudo.
-// Nesta etapa só a aba Dados funciona. Cada campo é gravado sozinho, sem botão "Salvar".
-import { obterImovel, atualizarImovel, excluirImovel } from './db.js';
+// Tela do imóvel: foto da fachada no topo + abas Dados → Ambientes → Assinaturas → Laudo.
+// Cada campo é gravado sozinho, sem botão "Salvar".
+import {
+  obterImovel, atualizarImovel, excluirImovel, definirFachada, obterFoto,
+} from './db.js';
 import {
   STATUS, LADOS, CONDICOES_OCUPANTE, USOS, ESTRUTURAS, COBERTURAS, FUNDACOES, IDADES,
   CONSERVACOES, rotuloDe,
 } from './dominio.js';
 import { capturarGps } from './gps.js';
-import { esc, dataHora, numeroBr, mostrarMensagem } from './util.js';
+import { processarFoto, textoCarimbo } from './foto.js';
+import { telaAmbientes } from './tela-ambientes.js';
+import {
+  esc, dataHora, numeroBr, mostrarMensagem, abrirTelaCheia, CASINHA_SVG,
+} from './util.js';
 
 const ABAS = [
   { id: 'dados', rotulo: 'Dados' },
@@ -16,7 +22,6 @@ const ABAS = [
 ];
 
 const EM_BREVE = {
-  ambientes: 'Ambientes, anomalias e fotos chegam na etapa 3.',
   assinaturas: 'As assinaturas na tela chegam na etapa 4.',
   laudo: 'O laudo em PDF chega na etapa 5.',
 };
@@ -62,31 +67,42 @@ function maisMenos(nome, valor, min, max) {
   </div>`;
 }
 
-// ---------- blocos da aba Dados ----------
-// Cada bloco abre fechado e mostra um resumo na linha do título.
+// ---------- resumos em frase ----------
 
-const juntar = (...partes) => partes.filter(Boolean).join(' · ');
+const frase = (...partes) => {
+  const t = partes.filter(Boolean).join(', ');
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
+};
+const minusculo = (t) => (t ? t.toLowerCase() : '');
+const ladoPorExtenso = (lado) => ({ LE: 'lado esquerdo', LD: 'lado direito' }[lado] ?? '');
+
+function textoLocal(im) {
+  return frase(im.estaca && `estaca ${im.estaca}`, ladoPorExtenso(im.lado)) || 'Estaca e lado a preencher';
+}
+
+// ---------- blocos da aba Dados (abrem fechados, resumo no título) ----------
 
 const BLOCOS = [
   {
     id: 'situacao',
     titulo: 'Situação',
-    resumo: (im) => juntar(rotuloDe(STATUS, im.status), im.status === 'recusado' && im.recusaMotivo),
+    resumo: (im) => rotuloDe(STATUS, im.status)
+      + (im.status === 'recusado' && im.recusaMotivo ? `: ${im.recusaMotivo}` : ''),
     html: (im) => `
       ${grupo('Situação da vistoria', chips('status', STATUS, im.status))}
       <div data-so-se-recusado ${im.status === 'recusado' ? '' : 'hidden'}>
         ${campo('Motivo da recusa', `<textarea name="recusaMotivo" rows="3">${esc(im.recusaMotivo)}</textarea>`)}
         ${campo('Nome da testemunha', texto('recusaTestemunha', im.recusaTestemunha))}
-        <p class="ajuda">A foto da fachada e o Termo de Recusa chegam nas próximas etapas.</p>
+        <p class="ajuda">Tire a foto da fachada no topo da tela. O Termo de Recusa chega numa próxima etapa.</p>
       </div>`,
   },
   {
     id: 'localizacao',
     titulo: 'Localização',
-    resumo: (im) => juntar(
+    resumo: (im) => frase(
       im.endereco,
-      im.estaca && `Est. ${im.estaca}`,
-      im.lado,
+      im.estaca && `estaca ${im.estaca}`,
+      ladoPorExtenso(im.lado),
       im.gps ? `GPS ±${im.gps.precisao} m` : (im.endereco || im.estaca) && 'sem GPS'
     ),
     html: (im) => `
@@ -95,10 +111,10 @@ const BLOCOS = [
       <fieldset class="campo">
         <legend>GPS do imóvel</legend>
         <div class="gps" id="gps-info">${gpsHtml(im.gps)}</div>
-        <button type="button" class="botao botao-largo" id="botao-gps">Capturar GPS</button>
+        <button type="button" class="botao botao-largo botao-secundario" id="botao-gps">Capturar GPS</button>
         <p class="ajuda">Fique em frente ao imóvel, de preferência ao ar livre.</p>
       </fieldset>
-      ${campo('Estaca mais próxima', texto('estaca', im.estaca, 'placeholder="ex.: 42+10"'))}
+      ${campo('Estaca mais próxima', texto('estaca', im.estaca, 'placeholder="ex.: 42+10" inputmode="text"'))}
       ${grupo('Lado da obra', chips('lado', LADOS, im.lado))}
       ${campo('Distância à borda da obra (m)',
         `<input type="number" name="distanciaObra" value="${im.distanciaObra ?? ''}" min="0" step="0.1" inputmode="decimal">`,
@@ -107,21 +123,25 @@ const BLOCOS = [
   {
     id: 'ocupante',
     titulo: 'Ocupante',
-    resumo: (im) => juntar(im.ocupanteNome, rotuloDe(CONDICOES_OCUPANTE, im.ocupanteCondicao), im.ocupanteTelefone),
+    resumo: (im) => frase(
+      im.ocupanteNome,
+      minusculo(rotuloDe(CONDICOES_OCUPANTE, im.ocupanteCondicao)),
+      im.ocupanteTelefone && 'telefone anotado'
+    ),
     html: (im) => `
       ${campo('Nome', texto('ocupanteNome', im.ocupanteNome, 'autocapitalize="words"'))}
       ${campo('Telefone', `<input type="tel" name="ocupanteTelefone" value="${esc(im.ocupanteTelefone)}" autocomplete="off" placeholder="(91) 9 0000-0000">`)}
       ${grupo('Condição', chips('ocupanteCondicao', CONDICOES_OCUPANTE, im.ocupanteCondicao))}
-      <p class="ajuda">LGPD: anotar só o necessário (nome e telefone). Os dados ficam apenas neste aparelho.</p>`,
+      <p class="ajuda">Anote só o necessário (nome e telefone). Os dados ficam apenas neste aparelho.</p>`,
   },
   {
     id: 'caracteristicas',
     titulo: 'Características',
-    resumo: (im) => juntar(
+    resumo: (im) => frase(
       rotuloDe(USOS, im.uso),
-      im.pavimentos != null && `${im.pavimentos} pav.`,
-      rotuloDe(ESTRUTURAS, im.estrutura),
-      im.conservacao && `conservação ${rotuloDe(CONSERVACOES, im.conservacao).toLowerCase()}`
+      im.pavimentos != null && `${im.pavimentos} ${im.pavimentos === 1 ? 'pavimento' : 'pavimentos'}`,
+      minusculo(rotuloDe(ESTRUTURAS, im.estrutura)),
+      im.conservacao && `conservação ${minusculo(rotuloDe(CONSERVACOES, im.conservacao))}`
     ),
     html: (im) => `
       ${grupo('Uso', chips('uso', USOS, im.uso))}
@@ -135,7 +155,7 @@ const BLOCOS = [
   {
     id: 'observacoes',
     titulo: 'Observações',
-    resumo: (im) => (im.observacoes.length > 40 ? `${im.observacoes.slice(0, 40)}…` : im.observacoes),
+    resumo: (im) => (im.observacoes.length > 60 ? `${im.observacoes.slice(0, 60)}…` : im.observacoes),
     html: (im) => `
       ${campo('Observações gerais', `<textarea name="observacoes" rows="5">${esc(im.observacoes)}</textarea>`)}`,
   },
@@ -144,15 +164,11 @@ const BLOCOS = [
 function qualidadeGps(precisao) {
   if (precisao <= 10) return { classe: 'boa', texto: 'boa' };
   if (precisao <= 25) return { classe: 'media', texto: 'aceitável' };
-  return { classe: 'fraca', texto: 'fraca — tente de novo ao ar livre' };
+  return { classe: 'fraca', texto: 'fraca, tente de novo ao ar livre' };
 }
 
 function gpsHtml(gps, buscando = false) {
-  if (!gps) {
-    return buscando
-      ? '<p><strong>Buscando sinal…</strong></p>'
-      : '<p>Ainda sem GPS.</p>';
-  }
+  if (!gps) return buscando ? '<p><strong>Buscando sinal…</strong></p>' : '<p>Ainda sem GPS.</p>';
   const q = qualidadeGps(gps.precisao);
   return `
     <p class="gps-coord">${numeroBr(gps.lat, 6)}, ${numeroBr(gps.lon, 6)}</p>
@@ -166,7 +182,7 @@ function htmlBloco(bloco, im, ultimo) {
     <details class="bloco" data-bloco="${bloco.id}">
       <summary>
         <span class="bloco-titulo">${bloco.titulo}</span>
-        <span class="bloco-resumo ${resumo ? '' : 'a-preencher'}">${esc(resumo || 'a preencher')}</span>
+        <span class="bloco-resumo ${resumo ? '' : 'a-preencher'}">${esc(resumo || 'Falta preencher')}</span>
       </summary>
       <div class="bloco-corpo">
         ${bloco.html(im)}
@@ -182,8 +198,8 @@ export async function telaImovel(raiz, id, aba) {
 
   if (!imovel) {
     raiz.innerHTML = `
-      <header class="barra-topo barra-imovel"><a class="voltar" href="#/">‹ Imóveis</a></header>
-      <div class="pagina"><p class="vazio">Imóvel ${esc(id)} não encontrado.</p></div>`;
+      <div class="pagina"><p class="vazio">Imóvel ${esc(id)} não encontrado.</p>
+      <a class="botao botao-largo" href="#/">Voltar para a lista</a></div>`;
     return null;
   }
 
@@ -191,192 +207,273 @@ export async function telaImovel(raiz, id, aba) {
   const base = `#/imovel/${encodeURIComponent(id)}`;
 
   raiz.innerHTML = `
-    <div class="topo-fixo">
-      <header class="barra-topo barra-imovel">
-        <a class="voltar" href="#/">‹ Imóveis</a>
-        <span class="piquete">${esc(id)}</span>
-        <span class="salvamento" id="salvamento" data-estado="ok">Salvo</span>
-      </header>
-      <nav class="abas" aria-label="Partes da vistoria">
-        ${ABAS.map((a) => `<a href="${base}/${a.id}" ${a.id === abaAtual ? 'aria-current="page"' : ''}>${a.rotulo}</a>`).join('')}
-      </nav>
-    </div>
-    <div class="pagina" id="conteudo-aba"></div>`;
+    <section class="capa" id="capa" aria-label="Fachada do imóvel"></section>
+    <nav class="abas" aria-label="Partes da vistoria">
+      ${ABAS.map((a) => `<a href="${base}/${a.id}" ${a.id === abaAtual ? 'aria-current="page"' : ''}>${a.rotulo}</a>`).join('')}
+    </nav>
+    <div class="pagina" id="conteudo-aba"></div>
+    <input type="file" accept="image/*" capture="environment" id="entrada-fachada" hidden>`;
 
+  const capa = raiz.querySelector('#capa');
   const conteudo = raiz.querySelector('#conteudo-aba');
-
-  if (abaAtual !== 'dados') {
-    conteudo.innerHTML = `<p class="vazio">${EM_BREVE[abaAtual]}</p>`;
-    return null;
-  }
-
-  conteudo.innerHTML = `
-    <form id="form-dados" autocomplete="off" novalidate>
-      ${BLOCOS.map((b, i) => htmlBloco(b, imovel, i === BLOCOS.length - 1)).join('')}
-    </form>
-    <p class="rodape-imovel">
-      Criado em ${dataHora(imovel.criadoEm)}<br>
-      <span id="ultima-alteracao">Última alteração: ${dataHora(imovel.atualizadoEm)}</span>
-    </p>
-    <button type="button" class="botao botao-perigo" id="excluir">Excluir este imóvel</button>`;
-
-  const form = conteudo.querySelector('#form-dados');
-  const indicador = raiz.querySelector('#salvamento');
-
-  // ----- gravação automática -----
-  const pendentes = new Map();
-  let temporizador = null;
-  let gravando = Promise.resolve();
+  const entradaFachada = raiz.querySelector('#entrada-fachada');
+  let urlCapa = null;
+  let fotoCapa = null;
+  let estadoSalvamento = { estado: 'ok', texto: 'Salvo' };
 
   function mostrarEstado(estado, textoEstado) {
-    indicador.dataset.estado = estado;
-    indicador.textContent = textoEstado;
-  }
-
-  function atualizarResumos() {
-    form.querySelectorAll('details.bloco').forEach((det) => {
-      const bloco = BLOCOS.find((b) => b.id === det.dataset.bloco);
-      const resumo = bloco.resumo(imovel);
-      const span = det.querySelector('.bloco-resumo');
-      span.textContent = resumo || 'a preencher';
-      span.classList.toggle('a-preencher', !resumo);
-    });
-    form.querySelector('[data-so-se-recusado]').hidden = imovel.status !== 'recusado';
-    const ultima = conteudo.querySelector('#ultima-alteracao');
-    if (ultima) ultima.textContent = `Última alteração: ${dataHora(imovel.atualizadoEm)}`;
-  }
-
-  function gravar() {
-    clearTimeout(temporizador);
-    if (!pendentes.size) return gravando;
-    const lote = Object.fromEntries(pendentes);
-    pendentes.clear();
-    // uma gravação de cada vez, na ordem
-    gravando = gravando.then(async () => {
-      try {
-        imovel = await atualizarImovel(id, lote);
-        if (!pendentes.size) mostrarEstado('ok', 'Salvo');
-        atualizarResumos();
-      } catch (erro) {
-        console.error(erro);
-        // devolve para a fila, sem passar por cima do que foi digitado depois
-        Object.entries(lote).forEach(([k, v]) => { if (!pendentes.has(k)) pendentes.set(k, v); });
-        mostrarEstado('erro', 'Erro ao salvar');
-        mostrarMensagem('Não foi possível salvar. Tente de novo.', 'erro');
-      }
-    });
-    return gravando;
-  }
-
-  function agendar(campoNome, valor, imediato = false) {
-    pendentes.set(campoNome, valor);
-    mostrarEstado('salvando', 'Salvando…');
-    clearTimeout(temporizador);
-    if (imediato) gravar();
-    else temporizador = setTimeout(gravar, ESPERA_DIGITACAO_MS);
-  }
-
-  function lerValor(alvo) {
-    if (alvo.type === 'number') return alvo.value === '' ? null : Number(alvo.value);
-    return alvo.value;
-  }
-
-  form.addEventListener('input', (e) => {
-    const alvo = e.target;
-    if (!alvo.name || alvo.type === 'radio' || alvo.tagName === 'SELECT') return;
-    agendar(alvo.name, lerValor(alvo));
-  });
-
-  form.addEventListener('change', (e) => {
-    const alvo = e.target;
-    if (!alvo.name) return;
-    agendar(alvo.name, lerValor(alvo), alvo.type === 'radio' || alvo.tagName === 'SELECT');
-  });
-
-  form.addEventListener('submit', (e) => e.preventDefault());
-
-  form.addEventListener('click', (e) => {
-    // botões − e +
-    const passo = e.target.closest('.botao-passo');
-    if (passo) {
-      const entrada = form.elements[passo.dataset.campo];
-      const min = Number(entrada.min);
-      const max = Number(entrada.max);
-      const atual = entrada.value === '' ? 0 : Number(entrada.value);
-      const novo = Math.min(max, Math.max(min, atual + Number(passo.dataset.passo)));
-      entrada.value = novo;
-      agendar(entrada.name, novo, true);
-      return;
+    estadoSalvamento = { estado, texto: textoEstado };
+    const ind = capa.querySelector('#salvamento');
+    if (ind) {
+      ind.dataset.estado = estado;
+      ind.textContent = textoEstado;
     }
-    // OK, próximo: fecha este bloco e abre o seguinte
-    const ok = e.target.closest('.ok-proximo');
-    if (ok) {
-      gravar();
-      const atual = ok.closest('details.bloco');
-      atual.open = false;
-      const proximo = atual.nextElementSibling;
-      if (proximo?.matches('details.bloco')) {
-        proximo.open = true;
-        proximo.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      } else {
-        atual.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
+  }
+
+  function atualizarCapaTexto() {
+    const selo = capa.querySelector('.selo');
+    if (selo) {
+      selo.className = `selo st-${imovel.status}`;
+      selo.textContent = rotuloDe(STATUS, imovel.status);
+    }
+    const local = capa.querySelector('#capa-local');
+    if (local) local.textContent = textoLocal(imovel);
+  }
+
+  async function desenharCapa() {
+    if (urlCapa) URL.revokeObjectURL(urlCapa);
+    urlCapa = null;
+    fotoCapa = imovel.fachada ? (await obterFoto(imovel.fachada.fotoId))?.blob ?? null : null;
+    if (fotoCapa) urlCapa = URL.createObjectURL(fotoCapa);
+
+    capa.classList.toggle('capa-sem-foto', !fotoCapa);
+    capa.innerHTML = `
+      ${fotoCapa
+        ? `<button type="button" class="capa-foto" id="ver-fachada" aria-label="Ver a foto da fachada inteira"><img src="${urlCapa}" alt=""></button>`
+        : `<div class="capa-vazia">${CASINHA_SVG}</div>`}
+      <div class="capa-barra">
+        <a class="pilula" href="#/">‹ Imóveis</a>
+        <span class="pilula salvamento" id="salvamento" data-estado="${estadoSalvamento.estado}">${estadoSalvamento.texto}</span>
+      </div>
+      <div class="capa-texto">
+        <p class="capa-num"><span class="num">${esc(id)}</span> <span class="selo st-${imovel.status}">${rotuloDe(STATUS, imovel.status)}</span></p>
+        <p class="capa-local" id="capa-local">${esc(textoLocal(imovel))}</p>
+      </div>
+      <button type="button" class="botao ${fotoCapa ? 'botao-capa' : 'botao-capa-vazia'}" id="botao-fachada">
+        ${fotoCapa ? 'Trocar foto' : 'Tirar foto da fachada'}
+      </button>`;
+  }
+
+  capa.addEventListener('click', (e) => {
+    if (e.target.closest('#ver-fachada') && fotoCapa) {
+      abrirTelaCheia(fotoCapa);
+    } else if (e.target.closest('#botao-fachada')) {
+      if (imovel.fachada && !confirm('Trocar a foto da fachada? A atual será apagada.')) return;
+      entradaFachada.click();
     }
   });
 
-  // ----- GPS -----
-  const botaoGps = form.querySelector('#botao-gps');
-  const infoGps = form.querySelector('#gps-info');
-  let capturaGps = null;
+  let sairDaAba = null;
 
-  botaoGps.addEventListener('click', async () => {
-    if (capturaGps) { // já buscando: o toque serve para parar e usar a melhor leitura
-      capturaGps.parar();
-      return;
-    }
-    infoGps.innerHTML = gpsHtml(null, true);
-    botaoGps.textContent = 'Parar e usar esta leitura';
-    capturaGps = capturarGps({
-      aoMelhorar: (leitura) => { infoGps.innerHTML = gpsHtml(leitura, true); },
-    });
-    let temGps = Boolean(imovel.gps);
+  entradaFachada.addEventListener('change', async () => {
+    const arquivo = entradaFachada.files[0];
+    entradaFachada.value = ''; // permite escolher o mesmo arquivo de novo
+    if (!arquivo) return; // desistiu da câmera
+    const botao = capa.querySelector('#botao-fachada');
+    botao.disabled = true;
+    botao.textContent = 'Preparando a foto…';
     try {
-      const leitura = await capturaGps.resultado;
-      agendar('gps', leitura, true);
-      temGps = true;
-      infoGps.innerHTML = gpsHtml(leitura);
-      mostrarMensagem(`GPS gravado (±${leitura.precisao} m).`);
+      const processada = await processarFoto(arquivo, textoCarimbo(imovel));
+      imovel = await definirFachada(id, processada);
+      mostrarMensagem('Foto da fachada gravada.');
     } catch (erro) {
-      infoGps.innerHTML = gpsHtml(imovel.gps);
+      console.error(erro);
       mostrarMensagem(erro.message, 'erro');
-    } finally {
-      capturaGps = null;
-      botaoGps.textContent = temGps ? 'Capturar GPS de novo' : 'Capturar GPS';
     }
-  });
-  if (imovel.gps) botaoGps.textContent = 'Capturar GPS de novo';
-
-  // ----- excluir -----
-  conteudo.querySelector('#excluir').addEventListener('click', async () => {
-    if (!confirm(`Excluir ${id}? Todos os dados deste imóvel serão apagados deste aparelho.`)) return;
-    clearTimeout(temporizador);
-    pendentes.clear();
-    await gravando;
-    await excluirImovel(id);
-    mostrarMensagem(`${id} excluído.`);
-    location.hash = '#/';
+    await desenharCapa();
+    await sairDaAba?.recarregar?.();
   });
 
-  // grava o que estiver pendente se o app for para segundo plano ou fechado
-  const aoEsconder = () => { if (document.visibilityState === 'hidden') gravar(); };
-  document.addEventListener('visibilitychange', aoEsconder);
-  window.addEventListener('pagehide', gravar);
+  await desenharCapa();
 
-  // função de saída (chamada ao trocar de tela)
+  // ---------- abas ----------
+  if (abaAtual === 'ambientes') {
+    sairDaAba = await telaAmbientes(conteudo, imovel, {
+      mostrarEstado,
+      // chamado quando a foto da fachada é apagada lá dentro
+      aoMudarImovel: async () => {
+        imovel = await obterImovel(id);
+        await desenharCapa();
+      },
+    });
+  } else if (abaAtual !== 'dados') {
+    conteudo.innerHTML = `<p class="vazio">${EM_BREVE[abaAtual]}</p>`;
+  } else {
+    sairDaAba = montarDados();
+  }
+
   return async () => {
-    capturaGps?.parar();
-    document.removeEventListener('visibilitychange', aoEsconder);
-    window.removeEventListener('pagehide', gravar);
-    await gravar();
+    await sairDaAba?.();
+    if (urlCapa) URL.revokeObjectURL(urlCapa);
   };
+
+  // ---------- aba Dados ----------
+  function montarDados() {
+    conteudo.innerHTML = `
+      <form id="form-dados" autocomplete="off" novalidate>
+        ${BLOCOS.map((b, i) => htmlBloco(b, imovel, i === BLOCOS.length - 1)).join('')}
+      </form>
+      <p class="rodape-imovel">
+        Criado em ${dataHora(imovel.criadoEm)}<br>
+        <span id="ultima-alteracao">Última alteração: ${dataHora(imovel.atualizadoEm)}</span>
+      </p>
+      <button type="button" class="botao botao-perigo" id="excluir">Excluir este imóvel</button>`;
+
+    const form = conteudo.querySelector('#form-dados');
+    const pendentes = new Map();
+    let temporizador = null;
+    let gravando = Promise.resolve();
+
+    function atualizarResumos() {
+      form.querySelectorAll('details.bloco').forEach((det) => {
+        const bloco = BLOCOS.find((b) => b.id === det.dataset.bloco);
+        const resumo = bloco.resumo(imovel);
+        const span = det.querySelector('.bloco-resumo');
+        span.textContent = resumo || 'Falta preencher';
+        span.classList.toggle('a-preencher', !resumo);
+      });
+      form.querySelector('[data-so-se-recusado]').hidden = imovel.status !== 'recusado';
+      const ultima = conteudo.querySelector('#ultima-alteracao');
+      if (ultima) ultima.textContent = `Última alteração: ${dataHora(imovel.atualizadoEm)}`;
+      atualizarCapaTexto();
+    }
+
+    function gravar() {
+      clearTimeout(temporizador);
+      if (!pendentes.size) return gravando;
+      const lote = Object.fromEntries(pendentes);
+      pendentes.clear();
+      // uma gravação de cada vez, na ordem
+      gravando = gravando.then(async () => {
+        try {
+          imovel = await atualizarImovel(id, lote);
+          if (!pendentes.size) mostrarEstado('ok', 'Salvo');
+          atualizarResumos();
+        } catch (erro) {
+          console.error(erro);
+          // devolve para a fila, sem passar por cima do que foi digitado depois
+          Object.entries(lote).forEach(([k, v]) => { if (!pendentes.has(k)) pendentes.set(k, v); });
+          mostrarEstado('erro', 'Erro ao salvar');
+          mostrarMensagem('Não foi possível salvar. Tente de novo.', 'erro');
+        }
+      });
+      return gravando;
+    }
+
+    function agendar(campoNome, valor, imediato = false) {
+      pendentes.set(campoNome, valor);
+      mostrarEstado('salvando', 'Salvando…');
+      clearTimeout(temporizador);
+      if (imediato) gravar();
+      else temporizador = setTimeout(gravar, ESPERA_DIGITACAO_MS);
+    }
+
+    const lerValor = (alvo) => (alvo.type === 'number'
+      ? (alvo.value === '' ? null : Number(alvo.value))
+      : alvo.value);
+
+    form.addEventListener('input', (e) => {
+      const alvo = e.target;
+      if (!alvo.name || alvo.type === 'radio' || alvo.tagName === 'SELECT') return;
+      agendar(alvo.name, lerValor(alvo));
+    });
+
+    form.addEventListener('change', (e) => {
+      const alvo = e.target;
+      if (!alvo.name) return;
+      agendar(alvo.name, lerValor(alvo), alvo.type === 'radio' || alvo.tagName === 'SELECT');
+    });
+
+    form.addEventListener('submit', (e) => e.preventDefault());
+
+    form.addEventListener('click', (e) => {
+      const passo = e.target.closest('.botao-passo');
+      if (passo) {
+        const entrada = form.elements[passo.dataset.campo];
+        const atual = entrada.value === '' ? 0 : Number(entrada.value);
+        const novo = Math.min(Number(entrada.max), Math.max(Number(entrada.min), atual + Number(passo.dataset.passo)));
+        entrada.value = novo;
+        agendar(entrada.name, novo, true);
+        return;
+      }
+      const ok = e.target.closest('.ok-proximo');
+      if (ok) {
+        gravar();
+        const atual = ok.closest('details.bloco');
+        atual.open = false;
+        const proximo = atual.nextElementSibling;
+        if (proximo?.matches('details.bloco')) {
+          proximo.open = true;
+          proximo.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        } else {
+          atual.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      }
+    });
+
+    // ----- GPS -----
+    const botaoGps = form.querySelector('#botao-gps');
+    const infoGps = form.querySelector('#gps-info');
+    let capturaGps = null;
+
+    botaoGps.addEventListener('click', async () => {
+      if (capturaGps) { // já buscando: o toque serve para parar e usar a melhor leitura
+        capturaGps.parar();
+        return;
+      }
+      infoGps.innerHTML = gpsHtml(null, true);
+      botaoGps.textContent = 'Parar e usar esta leitura';
+      capturaGps = capturarGps({
+        aoMelhorar: (leitura) => { infoGps.innerHTML = gpsHtml(leitura, true); },
+      });
+      let temGps = Boolean(imovel.gps);
+      try {
+        const leitura = await capturaGps.resultado;
+        agendar('gps', leitura, true);
+        temGps = true;
+        infoGps.innerHTML = gpsHtml(leitura);
+        mostrarMensagem(`GPS gravado (±${leitura.precisao} m).`);
+      } catch (erro) {
+        infoGps.innerHTML = gpsHtml(imovel.gps);
+        mostrarMensagem(erro.message, 'erro');
+      } finally {
+        capturaGps = null;
+        botaoGps.textContent = temGps ? 'Capturar GPS de novo' : 'Capturar GPS';
+      }
+    });
+    if (imovel.gps) botaoGps.textContent = 'Capturar GPS de novo';
+
+    // ----- excluir -----
+    conteudo.querySelector('#excluir').addEventListener('click', async () => {
+      if (!confirm(`Excluir ${id}? Os dados e as fotos deste imóvel serão apagados deste aparelho.`)) return;
+      clearTimeout(temporizador);
+      pendentes.clear();
+      await gravando;
+      await excluirImovel(id);
+      mostrarMensagem(`${id} excluído.`);
+      location.hash = '#/';
+    });
+
+    // grava o que estiver pendente se o app for para segundo plano ou fechado
+    const aoEsconder = () => { if (document.visibilityState === 'hidden') gravar(); };
+    document.addEventListener('visibilitychange', aoEsconder);
+    window.addEventListener('pagehide', gravar);
+
+    return async () => {
+      capturaGps?.parar();
+      document.removeEventListener('visibilitychange', aoEsconder);
+      window.removeEventListener('pagehide', gravar);
+      await gravar();
+    };
+  }
 }

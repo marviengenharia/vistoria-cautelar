@@ -65,6 +65,64 @@ export const CONSERVACOES = [
   { valor: 'ruim', rotulo: 'Ruim' },
 ];
 
+/** Patologias que o vistoriador marca em cada foto (várias por foto). */
+export const PATOLOGIAS = [
+  { valor: 'fissura', rotulo: 'Fissura', grupo: 'Fissuras e trincas' },
+  { valor: 'trinca', rotulo: 'Trinca', grupo: 'Fissuras e trincas' },
+  { valor: 'rachadura', rotulo: 'Rachadura', grupo: 'Fissuras e trincas' },
+  { valor: 'recalque', rotulo: 'Recalque diferencial', grupo: 'Recalque e prumo' },
+  { valor: 'piso-afundado', rotulo: 'Piso afundado', grupo: 'Recalque e prumo' },
+  { valor: 'desaprumo', rotulo: 'Desaprumo / inclinação', grupo: 'Recalque e prumo' },
+  { valor: 'desplacamento', rotulo: 'Desplacamento de revestimento', grupo: 'Revestimento' },
+  { valor: 'corrosao', rotulo: 'Corrosão de armadura', grupo: 'Concreto e aço' },
+  { valor: 'concreto-desagregado', rotulo: 'Concreto desagregado / ferro exposto', grupo: 'Concreto e aço' },
+  { valor: 'umidade', rotulo: 'Umidade / infiltração', grupo: 'Água' },
+  { valor: 'mofo', rotulo: 'Mofo', grupo: 'Água' },
+  { valor: 'eflorescencia', rotulo: 'Eflorescência (mancha branca)', grupo: 'Água' },
+  { valor: 'esquadria', rotulo: 'Porta ou janela travada', grupo: 'Esquadrias' },
+  { valor: 'telhado', rotulo: 'Telha quebrada / deslocada', grupo: 'Telhado e forro' },
+  { valor: 'forro', rotulo: 'Forro danificado', grupo: 'Telhado e forro' },
+  { valor: 'madeira', rotulo: 'Madeira podre / cupim', grupo: 'Madeira' },
+  { valor: 'outra', rotulo: 'Outra (descrever)', grupo: 'Outra' },
+];
+/** Marca especial: foto que mostra o local em bom estado. Não combina com as patologias. */
+export const SEM_PATOLOGIA = 'sem-patologia';
+
+/** Patologias em que faz sentido medir a abertura com fissurômetro. */
+export const PATOLOGIAS_COM_ABERTURA = ['fissura', 'trinca', 'rachadura'];
+
+export const LOCAIS_FOTO = [
+  { valor: 'parede', rotulo: 'Parede' },
+  { valor: 'teto', rotulo: 'Teto' },
+  { valor: 'piso', rotulo: 'Piso' },
+  { valor: 'viga', rotulo: 'Viga' },
+  { valor: 'pilar', rotulo: 'Pilar' },
+  { valor: 'muro', rotulo: 'Muro' },
+  { valor: 'calcada', rotulo: 'Calçada' },
+  { valor: 'fachada', rotulo: 'Fachada' },
+  { valor: 'cobertura', rotulo: 'Telhado' },
+];
+
+/** Nomes sugeridos ao criar um ambiente. */
+export const AMBIENTES_SUGERIDOS = [
+  'Fachada', 'Sala', 'Quarto', 'Cozinha', 'Banheiro', 'Área de serviço',
+  'Muro', 'Calçada', 'Área externa',
+];
+export const NOME_AMBIENTE_FACHADA = 'Fachada';
+
+/** Distância (em estacas) do filtro "Perto da estaca": 5 estacas = 100 m para cada lado. */
+export const RAIO_ESTACAS = 5;
+
+/**
+ * Converte o texto da estaca em número: "42+10" -> 42,5 (estaca de 20 m); "E42" -> 42.
+ * Devolve null se não houver número.
+ */
+export function estacaNumero(texto) {
+  const m = String(texto ?? '').replace(',', '.').match(/(\d+(?:\.\d+)?)(?:\s*\+\s*(\d+(?:\.\d+)?))?/);
+  if (!m) return null;
+  return Number(m[1]) + (m[2] ? Number(m[2]) / 20 : 0);
+}
+
 /** Texto mostrado para um valor de uma lista (ou '' se vazio). */
 export function rotuloDe(lista, valor) {
   return lista.find((o) => o.valor === valor)?.rotulo ?? '';
@@ -99,6 +157,8 @@ export function imovelVazio(id) {
     // recusa
     recusaMotivo: '',
     recusaTestemunha: '',
+    // foto da fachada: { fotoId, miniatura (Blob), tiradaEm } — a foto fica no depósito "fotos"
+    fachada: null,
     criadoEm: agora,
     atualizadoEm: agora,
   };

@@ -7,9 +7,9 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-AZUL = (11, 61, 145, 255)      # mesma cor do theme_color do manifest
+AZUL = (38, 43, 48, 255)       # asfalto: mesma cor do theme_color do manifest
 BRANCO = (255, 255, 255, 255)
-AMBAR = (255, 179, 0, 255)
+AMBAR = (242, 106, 27, 255)    # laranja de cone
 BASE = 1024                    # desenha grande e reduz (bordas suaves)
 PASTA = Path(__file__).resolve().parent.parent / "icons"
 

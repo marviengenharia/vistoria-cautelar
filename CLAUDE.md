@@ -7,9 +7,18 @@ Se não carregar (Drive `H:` desconectado), avisar antes de mexer em regras de n
 
 ## Estrutura
 - `index.html`, `manifest.json`, `service-worker.js` na raiz (publicados pelo GitHub Pages).
-- `js/app.js` roteador (`#/` lista, `#/imovel/IM-001/dados`), `js/db.js` IndexedDB (via `vendor/idb`),
-  `js/dominio.js` listas de opções e imóvel vazio, `js/gps.js`, `js/tela-*.js` uma tela por arquivo.
+- `js/app.js` roteador (`#/` lista, `#/imovel/IM-001/dados|ambientes`), `js/db.js` IndexedDB
+  (via `vendor/idb`; versão 2: `imoveis`, `config`, `ambientes`, `fotos`),
+  `js/dominio.js` listas de opções (patologias, locais, ambientes) e imóvel vazio, `js/gps.js`,
+  `js/foto.js` (redução 1600 px, carimbo, miniatura 240 px, SHA-256), `js/tela-*.js` uma tela por arquivo.
+- `vendor/fontes/` Barlow e Barlow Condensed (licença OFL junto).
 - `tools/gerar_icones.py` gera `icons/*.png`.
+- `docs/mockups/` prévias de layout (não fazem parte do app).
+
+## Testes
+`npm install` (uma vez) e `npm test` — sobe um servidor próprio na porta 8766 e roda os testes de
+navegador (`tests/*.teste.mjs`) no Edge/Chrome sem janela, inclusive sem servidor (offline).
+`npm test -- telas` roda só um arquivo. Rodar antes de cada commit.
 
 ## Regras do código
 - A cada mudança em arquivo do app: aumentar `VERSAO` em `service-worker.js` e, se criar arquivo

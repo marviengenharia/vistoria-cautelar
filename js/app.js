@@ -15,6 +15,7 @@ async function rotear() {
     sairDaTela = null;
   }
   const partes = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+  window.scrollTo(0, 0); // cada tela abre no topo
   try {
     if (partes[0] === 'imovel' && partes[1]) {
       sairDaTela = await telaImovel(raiz, partes[1], partes[2] || 'dados');

@@ -1,0 +1,12 @@
+{
+  "name": "vistoria-cautelar",
+  "private": true,
+  "type": "module",
+  "description": "App de vistoria cautelar — CBS Fase III. Este arquivo só serve para rodar os testes.",
+  "scripts": {
+    "test": "node tests/rodar.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "23.11.1"
+  }
+}
