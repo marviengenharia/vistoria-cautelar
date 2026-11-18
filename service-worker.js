@@ -1,7 +1,7 @@
 // Service Worker: guarda todos os arquivos do app no aparelho para abrir sem internet.
 // IMPORTANTE: a cada mudança em qualquer arquivo do app, aumentar VERSAO
 // (senão o celular continua usando a cópia antiga guardada).
-const VERSAO = '0.2.0';
+const VERSAO = '0.3.0';
 const CACHE = `vistoria-${VERSAO}`;
 
 const ARQUIVOS = [
@@ -13,6 +13,7 @@ const ARQUIVOS = [
   'js/db.js',
   'js/dominio.js',
   'js/foto.js',
+  'js/exif.js',
   'js/gps.js',
   'js/util.js',
   'js/tela-lista.js',

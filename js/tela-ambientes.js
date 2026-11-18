@@ -6,7 +6,7 @@ import {
 import {
   AMBIENTES_SUGERIDOS, PATOLOGIAS, SEM_PATOLOGIA, PATOLOGIAS_COM_ABERTURA, LOCAIS_FOTO,
 } from './dominio.js';
-import { processarFoto, textoCarimbo } from './foto.js';
+import { prepararFoto } from './foto.js';
 import { esc, dataHora, mostrarMensagem, abrirTelaCheia } from './util.js';
 
 const ESPERA_DIGITACAO_MS = 400;
@@ -187,7 +187,7 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
     for (let i = 0; i < arquivos.length; i += 1) {
       mostrarEstado('salvando', arquivos.length > 1 ? `Foto ${i + 1} de ${arquivos.length}…` : 'Preparando…');
       try {
-        const processada = await processarFoto(arquivos[i], textoCarimbo(imovel));
+        const processada = await prepararFoto(arquivos[i], imovel);
         ultima = await adicionarFoto(imovel.id, ambienteId, processada);
       } catch (erro) {
         console.error(erro);

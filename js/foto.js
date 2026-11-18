@@ -1,6 +1,7 @@
 // Tratamento das fotos no próprio aparelho: reduz, carimba, gera miniatura e
 // calcula a "impressão digital" (SHA-256) que prova que a foto não foi alterada depois.
 import { numeroBr } from './util.js';
+import { horaDaFoto } from './exif.js';
 
 const LADO_MAIOR = 1600;       // px (especificação)
 const QUALIDADE_FOTO = 0.75;   // JPEG (especificação)
@@ -9,10 +10,10 @@ const QUALIDADE_MINIATURA = 0.7;
 
 const dois = (n) => String(n).padStart(2, '0');
 
-/** "IM-001 · 18/11/2026 14:05 · -1,443600, -48,473200 ±6 m" (ou "· sem GPS"). */
+/** "IM-001 · 18/11/2026 14:05:32 · -1,443600, -48,473200 ±6 m" (ou "· sem GPS"). */
 export function textoCarimbo(imovel, data = new Date()) {
   const quando = `${dois(data.getDate())}/${dois(data.getMonth() + 1)}/${data.getFullYear()} `
-    + `${dois(data.getHours())}:${dois(data.getMinutes())}`;
+    + `${dois(data.getHours())}:${dois(data.getMinutes())}:${dois(data.getSeconds())}`;
   const gps = imovel.gps
     ? `${numeroBr(imovel.gps.lat, 6)}, ${numeroBr(imovel.gps.lon, 6)} ±${imovel.gps.precisao} m`
     : 'sem GPS';
@@ -88,4 +89,14 @@ export async function processarFoto(arquivo, carimbo) {
   } finally {
     imagem.close();
   }
+}
+
+/**
+ * Foto pronta para guardar: descobre a hora em que foi tirada, carimba e processa.
+ * @returns {Promise<{ foto: Blob, miniatura: Blob, hash: string, tiradaEm: string, origemHora: string }>}
+ */
+export async function prepararFoto(arquivo, imovel) {
+  const { data, origem } = await horaDaFoto(arquivo);
+  const processada = await processarFoto(arquivo, textoCarimbo(imovel, data));
+  return { ...processada, tiradaEm: data.toISOString(), origemHora: origem };
 }

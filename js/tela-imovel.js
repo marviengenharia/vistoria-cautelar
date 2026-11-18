@@ -8,7 +8,7 @@ import {
   CONSERVACOES, rotuloDe,
 } from './dominio.js';
 import { capturarGps } from './gps.js';
-import { processarFoto, textoCarimbo } from './foto.js';
+import { prepararFoto } from './foto.js';
 import { telaAmbientes } from './tela-ambientes.js';
 import {
   esc, dataHora, numeroBr, mostrarMensagem, abrirTelaCheia, CASINHA_SVG,
@@ -283,7 +283,7 @@ export async function telaImovel(raiz, id, aba) {
     botao.disabled = true;
     botao.textContent = 'Preparando a foto…';
     try {
-      const processada = await processarFoto(arquivo, textoCarimbo(imovel));
+      const processada = await prepararFoto(arquivo, imovel);
       imovel = await definirFachada(id, processada);
       mostrarMensagem('Foto da fachada gravada.');
     } catch (erro) {
