@@ -51,12 +51,15 @@ export async function montarBackup(imovelId) {
   return new File([zip], `${imovelId}_${dataLocal()}.zip`, { type: 'application/zip' });
 }
 
-/** Imóveis com alguma mudança depois do último backup dele (ou nunca copiados). */
+/**
+ * Imóveis com alguma mudança depois do último backup dele (ou nunca copiados).
+ * `desde` = desde quando está sem backup: a hora do último backup ou, se nunca teve, a criação.
+ */
 export async function imoveisSemBackup() {
   const backups = (await obterConfig('backups')) ?? {};
   return (await listarImoveis())
-    .map((im) => ({ id: im.id, desde: im.atualizadoEm ?? im.criadoEm ?? null }))
-    .filter((p) => !backups[p.id] || (p.desde && p.desde > backups[p.id]));
+    .filter((im) => !backups[im.id] || (im.atualizadoEm && im.atualizadoEm > backups[im.id]))
+    .map((im) => ({ id: im.id, desde: backups[im.id] ?? im.criadoEm ?? im.atualizadoEm ?? null }));
 }
 
 /**

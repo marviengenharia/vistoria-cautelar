@@ -133,12 +133,16 @@ export default async function ({ page, base, ok }) {
     const pendentes = async () => (await imoveisSemBackup()).map((p) => p.id);
     const semBackup = await imoveisSemBackup();
     out.antes = semBackup.some((p) => p.id === id);
-    out.desdeIgual = semBackup.find((p) => p.id === id)?.desde === (await db.obterImovel(id)).atualizadoEm;
+    out.desdeIgual = semBackup.find((p) => p.id === id)?.desde === (await db.obterImovel(id)).criadoEm;
     await pausa();
     await registrarBackup([id]);
     out.depoisRegistrar = (await pendentes()).includes(id);
     const backups = await db.obterConfig('backups');
     out.configBackups = typeof backups?.[id] === 'string';
+    // com backup anterior: "desde" = hora desse backup (não a da última mudança)
+    await pausa();
+    await db.atualizarImovel(id, { observacoes: 'mudou depois do backup' });
+    out.desdeBackup = (await imoveisSemBackup()).find((p) => p.id === id)?.desde === backups[id];
 
     // cada mudança no imóvel ou em algo dele põe o imóvel de volta em "sem backup"
     out.volta = {};
@@ -184,7 +188,8 @@ export default async function ({ page, base, ok }) {
     'backup: assinaturas em assinaturas/<id>-<pessoa>.png com os mesmos bytes');
   ok(b.codigoRecalculado, 'backup: código da assinatura recalculado a partir do zip confere');
   ok(b.bancoIntacto, 'backup: o banco continua com as imagens');
-  ok(b.antes && b.desdeIgual, 'sem backup: imóvel novo aparece, "desde" = atualizadoEm');
+  ok(b.antes && b.desdeIgual, 'sem backup: imóvel nunca copiado aparece, "desde" = criadoEm');
+  ok(b.desdeBackup, 'sem backup: mudou depois do backup, "desde" = hora do último backup');
   ok(!b.depoisRegistrar && b.configBackups, 'registrarBackup tira o imóvel da lista e grava em config "backups"');
   ok(Object.keys(b.volta).length === 8 && Object.values(b.volta).every(Boolean), `cada mudança volta para "sem backup" (${JSON.stringify(b.volta)})`);
   ok(b.soOOutro, 'mudança num imóvel não afeta o backup de outro');

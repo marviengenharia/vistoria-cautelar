@@ -294,6 +294,7 @@ export async function telaImovel(raiz, id, aba) {
     try {
       const processada = await prepararFoto(arquivo, imovel);
       imovel = await definirFachada(id, processada);
+      sairDaAba?.descartarBackupPronto?.(); // o arquivo de backup já preparado ficou velho
       mostrarMensagem('Foto da fachada gravada.');
     } catch (erro) {
       console.error(erro);
@@ -535,11 +536,13 @@ export async function telaImovel(raiz, id, aba) {
     document.addEventListener('visibilitychange', aoEsconder);
     window.addEventListener('pagehide', gravar);
 
-    return async () => {
+    const sair = async () => {
       capturaGps?.parar();
       document.removeEventListener('visibilitychange', aoEsconder);
       window.removeEventListener('pagehide', gravar);
       await gravar();
     };
+    sair.descartarBackupPronto = descartarBackupPronto;
+    return sair;
   }
 }

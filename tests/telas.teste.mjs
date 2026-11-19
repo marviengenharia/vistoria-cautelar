@@ -355,7 +355,7 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   await espiarDownloads();
   await page.waitForSelector('.aviso-backup');
   ok(await page.$eval('.aviso-backup-texto', (p) => p.textContent.trim()) === '4 imóveis sem backup', 'tela inicial: "4 imóveis sem backup"');
-  ok(await page.$eval('.aviso-backup', (s) => s.dataset.alerta) === 'false', 'aviso sem cor de alerta (mudanças de hoje)');
+  ok(await page.$eval('.aviso-backup', (s) => s.dataset.alerta) === 'false', 'aviso sem cor de alerta (imóveis criados hoje, nunca copiados)');
   ok(await page.$eval('.aviso-backup button', (b) => b.textContent.trim()) === 'Fazer backup dos 4', 'botão "Fazer backup dos 4"');
   ok(await page.$eval('.aviso-backup', (s) => s.closest('.pagina-lista') && !s.closest('.topo')), 'aviso fica abaixo do placar, no início da lista');
   await page.click('.aviso-backup button');
@@ -415,27 +415,38 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   await page.waitForSelector('.segmentos');
   ok(!(await page.$('.aviso-backup')), 'sem pendentes, o aviso some');
 
-  // mais de 2 dias sem backup: aviso em cor de alerta
-  const gravarDireto = (atualizadoEm, backupEm) => page.evaluate((a, bk) => new Promise((res, rej) => {
+  // alerta = sem backup há mais de 2 dias, contados do último backup (ou da criação, se nunca teve)
+  // backupEm null = o imóvel nunca teve backup
+  const gravarDireto = (campos, backupEm) => page.evaluate((c, bk) => new Promise((res, rej) => {
     const q = indexedDB.open('vistoria-cautelar');
     q.onsuccess = () => {
       const tx = q.result.transaction(['imoveis', 'config'], 'readwrite');
       const imoveis = tx.objectStore('imoveis');
       const config = tx.objectStore('config');
-      imoveis.get('IM-002').onsuccess = (e) => imoveis.put({ ...e.target.result, atualizadoEm: a });
-      config.get('backups').onsuccess = (e) => config.put({ ...e.target.result, 'IM-002': bk }, 'backups');
+      imoveis.get('IM-002').onsuccess = (e) => imoveis.put({ ...e.target.result, ...c });
+      config.get('backups').onsuccess = (e) => {
+        const backups = { ...e.target.result };
+        if (bk) backups['IM-002'] = bk; else delete backups['IM-002'];
+        config.put(backups, 'backups');
+      };
       tx.oncomplete = () => { q.result.close(); res(); };
       tx.onerror = () => rej(tx.error);
     };
-  }), atualizadoEm, backupEm);
+  }), campos, backupEm);
   const diasAtras = (d) => new Date(Date.now() - d * 864e5).toISOString();
-  await gravarDireto(new Date().toISOString(), diasAtras(3));
-  await page.reload({ waitUntil: 'networkidle0' });
-  await page.waitForSelector('.aviso-backup');
-  ok(await page.$eval('.aviso-backup', (s) => s.dataset.alerta) === 'false', 'mudança recente (backup antigo): ainda sem alerta');
-  await gravarDireto(diasAtras(2.5), diasAtras(3));
-  await page.reload({ waitUntil: 'networkidle0' });
-  await page.waitForSelector('.aviso-backup');
+  const alertaAgora = async () => {
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForSelector('.aviso-backup');
+    return page.$eval('.aviso-backup', (s) => s.dataset.alerta);
+  };
+  await gravarDireto({ atualizadoEm: new Date().toISOString() }, diasAtras(1));
+  ok(await alertaAgora() === 'false', 'último backup há 1 dia e mudança hoje: sem alerta');
+  await gravarDireto({ criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString() }, null);
+  ok(await alertaAgora() === 'false', 'nunca teve backup, criado hoje: sem alerta');
+  await gravarDireto({ criadoEm: diasAtras(3), atualizadoEm: new Date().toISOString() }, null);
+  ok(await alertaAgora() === 'true', 'nunca teve backup, criado há 3 dias: alerta');
+  await gravarDireto({ atualizadoEm: new Date().toISOString() }, diasAtras(3));
+  ok(await alertaAgora() === 'true', 'último backup há 3 dias e mudança hoje: alerta (mexer todo dia não esconde)');
   const alerta = await page.$eval('.aviso-backup', (s) => ({ attr: s.dataset.alerta, cor: getComputedStyle(s).borderLeftColor }));
   const corPerigo = await page.evaluate(() => {
     const t = document.createElement('i');
@@ -446,6 +457,18 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
     return c;
   });
   ok(alerta.attr === 'true' && alerta.cor === corPerigo, `sem backup há mais de 2 dias: aviso em cor de alerta (${alerta.cor})`);
+
+  // arquivo preparado e depois a fachada muda: o arquivo velho é descartado
+  await page.goto(base + '#/imovel/IM-002/dados');
+  await page.waitForSelector('#fazer-backup');
+  await page.$eval('#fazer-backup', (b) => b.scrollIntoView({ block: 'center' }));
+  await page.click('#fazer-backup');
+  await page.waitForFunction(() => document.querySelector('#fazer-backup').textContent.trim().startsWith('Compartilhar '), { timeout: 20000 });
+  await limparMensagem();
+  await (await page.$('#entrada-fachada')).uploadFile(fixture('fachada.jpg'));
+  await mensagemTem('Foto da fachada gravada.');
+  ok(await page.$eval('#fazer-backup', (b) => b.textContent.trim()) === 'Fazer backup deste imóvel',
+    'fachada trocada depois de preparar: o arquivo preparado é descartado');
 
   // ---------- sem internet ----------
   await pararServidor();
