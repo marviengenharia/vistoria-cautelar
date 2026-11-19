@@ -12,6 +12,7 @@ import { capturarGps } from './gps.js';
 import { prepararFoto } from './foto.js';
 import { telaAmbientes } from './tela-ambientes.js';
 import { telaAssinaturas } from './tela-assinaturas.js';
+import { telaLaudo } from './tela-laudo.js';
 import { montarBackup, registrarBackup } from './backup.js';
 import { compartilharArquivos } from './compartilhar.js';
 import {
@@ -24,10 +25,6 @@ const ABAS = [
   { id: 'assinaturas', rotulo: 'Assinaturas' },
   { id: 'laudo', rotulo: 'Laudo' },
 ];
-
-const EM_BREVE = {
-  laudo: 'O laudo em PDF chega na etapa 5.',
-};
 
 const ESPERA_DIGITACAO_MS = 400; // grava 0,4 s depois que a pessoa para de digitar
 
@@ -294,7 +291,7 @@ export async function telaImovel(raiz, id, aba) {
     try {
       const processada = await prepararFoto(arquivo, imovel);
       imovel = await definirFachada(id, processada);
-      sairDaAba?.descartarBackupPronto?.(); // o arquivo de backup já preparado ficou velho
+      sairDaAba?.descartarArquivoPronto?.(); // o backup ou o laudo já preparado ficou velho
       mostrarMensagem('Foto da fachada gravada.');
     } catch (erro) {
       console.error(erro);
@@ -316,8 +313,8 @@ export async function telaImovel(raiz, id, aba) {
     sairDaAba = await telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarImovel });
   } else if (abaAtual === 'assinaturas') {
     sairDaAba = await telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudarImovel });
-  } else if (abaAtual !== 'dados') {
-    conteudo.innerHTML = `<p class="vazio">${EM_BREVE[abaAtual]}</p>`;
+  } else if (abaAtual === 'laudo') {
+    sairDaAba = await telaLaudo(conteudo, imovel, { mostrarEstado });
   } else {
     sairDaAba = montarDados();
   }
@@ -542,7 +539,7 @@ export async function telaImovel(raiz, id, aba) {
       window.removeEventListener('pagehide', gravar);
       await gravar();
     };
-    sair.descartarBackupPronto = descartarBackupPronto;
+    sair.descartarArquivoPronto = descartarBackupPronto;
     return sair;
   }
 }

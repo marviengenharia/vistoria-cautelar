@@ -337,6 +337,29 @@ export async function gravarConfig(chave, valor) {
   await db.put('config', valor, chave);
 }
 
+// "Meus dados" do vistoriador deste celular: { nome, crea, art } — sai como responsável técnico no
+// laudo. Antes da etapa 5 só havia o nome, em 'vistoriadorNome' (continua sendo gravado junto).
+const meusDadosDe = (meus, nomeAntigo) => ({
+  nome: meus?.nome ?? nomeAntigo ?? '', crea: meus?.crea ?? '', art: meus?.art ?? '',
+});
+
+export async function obterMeusDados() {
+  const db = await bancoPronto;
+  return meusDadosDe(await db.get('config', 'meusDados'), await db.get('config', 'vistoriadorNome'));
+}
+
+/** Grava só os campos informados (ex.: `{ nome }`) e devolve os dados completos. */
+export async function gravarMeusDados(campos) {
+  const db = await bancoPronto;
+  const tx = db.transaction('config', 'readwrite');
+  const atual = meusDadosDe(await tx.store.get('meusDados'), await tx.store.get('vistoriadorNome'));
+  const novo = { ...atual, ...campos };
+  await tx.store.put(novo, 'meusDados');
+  if ('nome' in campos) await tx.store.put(novo.nome, 'vistoriadorNome');
+  await tx.done;
+  return novo;
+}
+
 // ===================== assinaturas =====================
 
 const mesmoConjunto = (a, b) => {

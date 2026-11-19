@@ -2,6 +2,7 @@
 import { pedirArmazenamentoPersistente } from './db.js';
 import { telaLista } from './tela-lista.js';
 import { telaImovel } from './tela-imovel.js';
+import { telaMeusDados } from './tela-meus-dados.js';
 import { esc } from './util.js';
 
 const raiz = document.getElementById('app');
@@ -19,6 +20,8 @@ async function rotear() {
   try {
     if (partes[0] === 'imovel' && partes[1]) {
       sairDaTela = await telaImovel(raiz, partes[1], partes[2] || 'dados');
+    } else if (partes[0] === 'meus-dados') {
+      sairDaTela = await telaMeusDados(raiz);
     } else {
       sairDaTela = await telaLista(raiz);
     }

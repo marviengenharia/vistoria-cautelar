@@ -174,10 +174,10 @@ a { color: inherit; }
 .aviso-backup-ajuda { margin: -6px 0 10px; font: 600 15px/1.3 var(--texto); color: var(--tinta-2); }
 .aviso-backup-botoes { display: grid; gap: 10px; }
 
-/* "Restaurar backup": uso raro (celular novo), fica discreto no fim da lista */
-.link-restaurar {
-  display: flex; align-items: center; justify-content: center; width: fit-content;
-  min-height: 44px; margin: 32px auto 0; padding: 0 12px; cursor: pointer;
+/* "Meus dados" e "Restaurar backup": uso raro, ficam discretos no fim da lista */
+.links-discretos { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; margin-top: 32px; }
+.link-discreto {
+  display: flex; align-items: center; min-height: 44px; padding: 0 12px; cursor: pointer;
   font: 600 16px var(--texto); color: var(--tinta-2); text-decoration: underline;
 }
 
@@ -481,3 +481,20 @@ fieldset.sem-moldura { border: 0; margin: 0; padding: 0; min-width: 0; }
 .historico-item:last-child { border-bottom: 0; }
 .historico-item .assinatura-linha { font-weight: 600; font-size: 16px; }
 #concluir-assinaturas, #nova-assinatura { margin-top: 16px; }
+
+/* ================= aba Laudo ================= */
+.laudo-resumo {
+  margin: 0 0 16px; padding: 12px 14px; background: var(--papel-2);
+  border-left: 5px solid var(--cone); border-radius: var(--raio);
+}
+.laudo-resumo p { margin: 0; padding: 6px 0; font: 600 18px/1.35 var(--texto); overflow-wrap: anywhere; }
+.laudo-resumo p + p { border-top: 2px solid var(--papel); }
+.laudo-rascunho { color: var(--perigo); }
+.link-trocar { margin-left: 6px; color: var(--tinta-2); font-weight: 600; white-space: nowrap; }
+.campo-destaque { margin: 0 0 16px; padding: 12px 14px; border: 2px solid var(--cone); border-radius: var(--raio); }
+#gerar-laudo { overflow-wrap: anywhere; padding-top: 8px; padding-bottom: 8px; }
+
+/* ================= Meus dados ================= */
+.topo-com-volta { display: flex; align-items: center; gap: 12px; }
+.topo-com-volta h1 { flex: 1; }
+.explicacao { margin: 0; font: 600 18px/1.4 var(--texto); }

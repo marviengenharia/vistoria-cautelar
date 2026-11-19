@@ -3,7 +3,7 @@
 // Os traços só são gravados ao tocar em "Concluir assinaturas".
 import {
   obterImovel, listarAmbientes, listarFotosDoImovel, listarAssinaturas, gravarAssinatura,
-  obterConfig, gravarConfig,
+  obterMeusDados, gravarMeusDados,
 } from './db.js';
 import { textoTermoCiencia, textoTermoRecusa, FOTOS_MUDARAM } from './dominio.js';
 import { criarAreaAssinatura } from './area-assinatura.js';
@@ -40,7 +40,7 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
     imovel = (await obterImovel(imovel.id)) ?? imovel;
     [ambientes, fotos, assinaturas, nomeVistoriador] = await Promise.all([
       listarAmbientes(imovel.id), listarFotosDoImovel(imovel.id), listarAssinaturas(imovel.id),
-      obterConfig('vistoriadorNome'),
+      obterMeusDados().then((m) => m.nome),
     ]);
   }
 
@@ -327,7 +327,7 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
     }
     // a assinatura já está gravada: falha ao lembrar o nome não é falha da assinatura
     try {
-      await gravarConfig('vistoriadorNome', vistoriadorNome);
+      await gravarMeusDados({ nome: vistoriadorNome }); // é o mesmo nome de "Meus dados"
     } catch (erro) {
       console.error(erro);
     }

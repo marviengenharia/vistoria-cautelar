@@ -26,6 +26,8 @@ const ARQUIVOS = [
   'js/tela-imovel.js',
   'js/tela-ambientes.js',
   'js/tela-assinaturas.js',
+  'js/tela-laudo.js',
+  'js/tela-meus-dados.js',
   'vendor/idb/index.js',
   'vendor/jspdf/jspdf.umd.min.js',
   'img/logo-cbs.png',

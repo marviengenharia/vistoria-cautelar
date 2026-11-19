@@ -474,6 +474,106 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   ok(await page.$eval('#fazer-backup', (b) => b.textContent.trim()) === 'Fazer backup deste imóvel',
     'fachada trocada depois de preparar: o arquivo preparado é descartado');
 
+  // ---------- meus dados ----------
+  await voltarParaLista();
+  ok(await page.$eval('#meus-dados', (l) => l.textContent.trim() === 'Meus dados'
+    && l.parentElement === document.querySelector('#restaurar').parentElement && l.closest('.pagina-lista')),
+  'tela inicial: link discreto "Meus dados" ao lado de "Restaurar backup"');
+  await page.click('#meus-dados');
+  await page.waitForSelector('#form-meus-dados');
+  ok(await page.evaluate(() => location.hash) === '#/meus-dados', 'Meus dados abre em #/meus-dados');
+  ok(await page.$eval('input[name="nome"]', (i) => i.value) === 'João Vistoriador', 'Meus dados: o nome usado nas assinaturas já vem preenchido');
+  ok((await page.$eval('#form-meus-dados', (f) => f.textContent)).includes('Seu nome sai como responsável técnico no laudo'),
+    'Meus dados explica para que serve o nome');
+  await page.type('input[name="crea"]', '000000/D-TESTE');
+  await page.type('input[name="art"]', 'ART-TESTE-1');
+  await esperar(700);
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.waitForSelector('#form-meus-dados');
+  const meus = await page.evaluate(async () => ({
+    tela: ['nome', 'crea', 'art'].map((n) => document.querySelector(`input[name="${n}"]`).value).join('|'),
+    config: await (await import('/js/db.js')).obterConfig('meusDados'),
+  }));
+  ok(meus.tela === 'João Vistoriador|000000/D-TESTE|ART-TESTE-1'
+    && JSON.stringify(meus.config) === JSON.stringify({ nome: 'João Vistoriador', crea: '000000/D-TESTE', art: 'ART-TESTE-1' }),
+  `Meus dados grava sozinho e volta preenchido (${JSON.stringify(meus)})`);
+
+  // ---------- aba Laudo ----------
+  // o Edge de teste diz que compartilha PDF (zip não), mas a folha nunca abre sem janela: desliga o
+  // Compartilhar e o PDF é "baixado" (guarda nome e endereço do arquivo)
+  const espiarPdf = () => page.evaluate(() => {
+    navigator.canShare = () => false;
+    window.__baixados = [];
+    window.__urls = [];
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download) { window.__baixados.push(this.download); window.__urls.push(this.href); }
+    };
+  });
+  const comecoDoPdf = () => page.evaluate(async () => {
+    const b = new Uint8Array(await (await fetch(window.__urls[0])).arrayBuffer());
+    return String.fromCharCode(...b.subarray(0, 5));
+  });
+  // guarda cada estado do botão (o "Gerando…" pode durar pouco)
+  const vigiarBotao = () => page.evaluate(() => {
+    const b = document.querySelector('#gerar-laudo');
+    window.__estados = [];
+    new MutationObserver(() => window.__estados.push({ desativado: b.disabled, texto: b.textContent.trim() }))
+      .observe(b, { attributes: true, childList: true, characterData: true, subtree: true });
+  });
+  await page.goto(base + '#/imovel/IM-001/laudo');
+  await page.waitForSelector('#gerar-laudo');
+  const assinadoEm = await page.evaluate(async () => {
+    const lista = await (await import('/js/db.js')).listarAssinaturas('IM-001');
+    const ultima = lista.map((a) => a.assinadoEm).sort().pop();
+    return (await import('/js/util.js')).dataHora(ultima);
+  });
+  const resumoLaudo = await page.$eval('#conteudo-aba', (c) => c.innerText);
+  ok(!resumoLaudo.includes('etapa 5'), 'aba Laudo: sem o aviso "chega na etapa 5"');
+  ok(resumoLaudo.includes('2 fotos, 1 com patologia'), `aba Laudo: "2 fotos, 1 com patologia" (${resumoLaudo})`);
+  ok(resumoLaudo.includes(`Termo assinado em ${assinadoEm}`), `aba Laudo: "Termo assinado em ${assinadoEm}"`);
+  ok(resumoLaudo.includes('Responsável: João Vistoriador (CREA 000000/D-TESTE · ART ART-TESTE-1)'), 'aba Laudo: responsável com CREA e ART');
+  await espiarPdf();
+  await vigiarBotao();
+  await page.click('#gerar-laudo');
+  const pdfIm001 = `IM-001_${hoje}.pdf`;
+  await page.waitForFunction((n) => document.querySelector('#gerar-laudo').textContent.trim() === `Compartilhar ${n}`
+    && !document.querySelector('#gerar-laudo').disabled, { timeout: 30000 }, pdfIm001);
+  ok((await page.evaluate(() => window.__estados)).some((e) => e.desativado && e.texto === 'Gerando…'),
+    'botão "Gerando…" desativado enquanto gera');
+  ok(true, `laudo pronto: botão vira "Compartilhar ${pdfIm001}"`);
+  await limparMensagem();
+  await page.click('#gerar-laudo');
+  await mensagemTem('Laudo de IM-001 baixado.');
+  ok((await page.evaluate(() => window.__baixados)).join() === pdfIm001 && await comecoDoPdf() === '%PDF-',
+    'segundo toque: o PDF é "baixado" (sem Compartilhar no Edge de teste)');
+  ok(await page.$eval('#gerar-laudo', (b) => b.textContent.trim()) === 'Gerar laudo', 'depois de baixar, o botão volta a "Gerar laudo"');
+
+  // sem nome em "Meus dados": pede o nome ali mesmo e só gera depois
+  await page.evaluate(async () => (await import('/js/db.js')).gravarConfig('meusDados', { nome: '', crea: '', art: '' }));
+  await page.goto(base + '#/imovel/IM-002/laudo');
+  await page.waitForSelector('#gerar-laudo');
+  const rascunho = await page.$eval('#conteudo-aba', (c) => c.innerText);
+  ok(rascunho.includes('Termo ainda não assinado — o laudo sai como RASCUNHO'), 'sem assinatura: avisa que sai como RASCUNHO');
+  ok(await page.$eval('#gerar-laudo', (b) => b.disabled) && Boolean(await page.$('input[name="laudo-nome"]')),
+    'sem nome: campo do nome na própria aba e "Gerar laudo" desativado');
+  await page.type('input[name="laudo-nome"]', 'Ana Responsável');
+  ok(await page.$eval('#gerar-laudo', (b) => !b.disabled), 'nome digitado: "Gerar laudo" liberado');
+  await esperar(700);
+  const nomeGravado = await page.evaluate(async () => {
+    const db = await import('/js/db.js');
+    return [(await db.obterConfig('meusDados')).nome, await db.obterConfig('vistoriadorNome')].join('|');
+  });
+  ok(nomeGravado === 'Ana Responsável|Ana Responsável', `nome digitado na aba Laudo vai para "Meus dados" (${nomeGravado})`);
+  // laudo pronto e a fachada muda: o PDF velho é descartado
+  await espiarPdf();
+  await page.click('#gerar-laudo');
+  await page.waitForFunction(() => document.querySelector('#gerar-laudo').textContent.trim().startsWith('Compartilhar '), { timeout: 30000 });
+  await limparMensagem();
+  await (await page.$('#entrada-fachada')).uploadFile(fixture('fachada.jpg'));
+  await mensagemTem('Foto da fachada gravada.');
+  ok(await page.$eval('#gerar-laudo', (b) => b.textContent.trim()) === 'Gerar laudo',
+    'fachada trocada depois de gerar: o laudo pronto é descartado');
+
   // backups do IM-001 (com assinaturas) e do IM-002 (com fachada) guardados para restaurar no fim,
   // depois de eles serem excluídos
   const zips = await page.evaluate(async () => {
@@ -508,6 +608,17 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   await page.goto(base + '#/imovel/IM-001/assinaturas');
   await page.waitForSelector('.assinatura-feita', { timeout: 10000 });
   ok(true, 'SEM SERVIDOR: aba Assinaturas abre');
+  // recarrega sem servidor: tudo (inclusive o gerador do PDF e o logo) vem do aparelho
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.goto(base + '#/imovel/IM-001/laudo');
+  await page.waitForSelector('#gerar-laudo', { timeout: 10000 });
+  await espiarPdf();
+  await page.click('#gerar-laudo');
+  await page.waitForFunction((n) => document.querySelector('#gerar-laudo').textContent.trim() === `Compartilhar ${n}`
+    && !document.querySelector('#gerar-laudo').disabled, { timeout: 30000 }, pdfIm001);
+  await page.click('#gerar-laudo');
+  await page.waitForFunction(() => window.__baixados.length === 1, { timeout: 10000 });
+  ok(await comecoDoPdf() === '%PDF-', 'SEM SERVIDOR: aba Laudo abre e gera o PDF');
 
   // ---------- excluir imóvel com assinaturas ----------
   const dialogos = [];

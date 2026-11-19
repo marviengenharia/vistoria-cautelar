@@ -89,8 +89,11 @@ export async function telaLista(raiz) {
 
       <div id="grupos"></div>
 
-      <label class="link-restaurar" id="restaurar"><span>Restaurar backup</span>
-        <input type="file" accept=".zip,application/zip" multiple id="entrada-restaurar" hidden></label>
+      <div class="links-discretos">
+        <a class="link-discreto" id="meus-dados" href="#/meus-dados">Meus dados</a>
+        <label class="link-discreto" id="restaurar"><span>Restaurar backup</span>
+          <input type="file" accept=".zip,application/zip" multiple id="entrada-restaurar" hidden></label>
+      </div>
     </div>
 
     <button type="button" class="botao-novo" id="novo-imovel">+ Imóvel</button>
