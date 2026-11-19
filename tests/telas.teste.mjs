@@ -9,7 +9,7 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   await page.goto(base, { waitUntil: 'networkidle0' });
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.reload({ waitUntil: 'networkidle0' });
-  ok(await page.evaluate(async () => (await caches.keys()).includes('vistoria-0.3.0')), 'cache vistoria-0.3.0 criado');
+  ok(await page.evaluate(async () => (await caches.keys()).includes('vistoria-0.4.0')), 'cache vistoria-0.4.0 criado');
   ok(await page.$eval('body', (b) => getComputedStyle(b).fontFamily.includes('Barlow')), 'fonte Barlow em uso');
 
   // ---------- IM-001: fachada ----------
