@@ -1,6 +1,6 @@
 // Laudo em PDF: gerado no aparelho (jsPDF), com dados fictícios e as fotos de teste.
 // Se a variável LAUDO_AMOSTRA tiver um caminho (…/x.pdf), grava ali os PDFs gerados, para olhar:
-// x.pdf (assinado), x-rascunho.pdf e x-recusa.pdf.
+// x.pdf (assinado), x-rascunho.pdf, x-recusa.pdf, x-longo.pdf e x-grande.pdf.
 import fs from 'node:fs';
 
 export default async function ({ page, base, ok }) {
@@ -41,6 +41,36 @@ export default async function ({ page, base, ok }) {
     const contem = (grande, pequeno) => texto(grande).includes(texto(pequeno));
     const paginas = (s) => (s.match(/\/Type \/Page(?!s)/g) ?? []).length;
     const responsavel = { nome: 'Vistoriador Teste', crea: 'CREA-PA 0000', art: '0000000000' };
+
+    // Textos de cada página, com a altura (mm a partir do topo), lidos do PDF sem compressão.
+    const textosPorPagina = (s) => s.split('endstream').filter((b) => b.includes('\nBT\n')).map((bloco) => {
+      const itens = [];
+      for (const bt of bloco.split('\nBT\n').slice(1)) {
+        const td = /([-\d.]+) ([-\d.]+) Td/.exec(bt);
+        if (!td) continue;
+        const passo = Number(/([-\d.]+) TL/.exec(bt)?.[1] ?? 0);
+        let altura = Number(td[2]);
+        const re = /(T\* )?\(((?:\\.|[^\\)])*)\) Tj/g;
+        for (let m = re.exec(bt); m; m = re.exec(bt)) {
+          if (m[1]) altura -= passo;
+          itens.push({ y: 297 - (altura * 25.4) / 72, texto: m[2] });
+        }
+      }
+      return itens;
+    });
+    // o PDF guarda parênteses e barras invertidas com uma barra invertida na frente
+    const comoNoPdf = (t) => t.replace(/[()\\]/g, '\\$&');
+    const FIM = 278.5; // mm: abaixo disso só o rodapé e a faixa de rascunho
+    const TITULO = /^(Objetivo|Método|Identificação e localização|Características e estado de conservação|Relatório fotográfico|Quadro-resumo das patologias|Conclusão|Termo de ciência|Termo de Recusa|Descrições completas)$/;
+    const diagramacao = (s) => {
+      const pags = textosPorPagina(s);
+      return {
+        paginasLidas: pags.length === paginas(s),
+        semVazar: pags.every((itens) => itens.every((i) => i.y <= FIM || (/^(Vistoria cautelar|página|RASCUNHO)/.test(i.texto) && i.y < 295))),
+        semOrfao: pags.every((itens) => itens.filter((i) => TITULO.test(i.texto))
+          .every((t) => itens.some((i) => i.y > t.y + 1 && i.y <= FIM))),
+      };
+    };
 
     async function imovelComFotos(endereco) {
       const im = await db.criarImovel();
@@ -96,6 +126,8 @@ export default async function ({ page, base, ok }) {
       termo: s.includes('Termo de ci'),
       responsavel: s.includes('CREA-PA 0000') && s.includes('0000000000'),
       depois: s.includes('depois da assinatura'),
+      concordancia: s.includes(comoNoPdf('Foto incluída depois da assinatura (não consta deste termo): 4.')),
+      diagramacao: diagramacao(s),
       semPatologia: s.includes('Sem patologia aparente'),
     };
     // fotos carimbadas entram byte a byte (sem recompressão) e o código completo aparece no termo
@@ -143,6 +175,37 @@ export default async function ({ page, base, ok }) {
       recusa: sc.includes('Termo de Recusa'), rascunho: sc.includes('RASCUNHO'), paginas: paginas(sc),
       testemunha: sc.includes('Testemunha Fict'), nome: arqC.name, nomeEsperado: `${c.id}_${hoje}.pdf`,
     };
+    out.b.diagramacao = diagramacao(sb);
+    out.c.diagramacao = diagramacao(sc);
+
+    // ---------- 4) textos maiores que uma página: observação, descrição de foto e termo ----------
+    const lg = await imovelComFotos('Rua dos Textos Longos, 99');
+    await db.atualizarImovel(lg.id, {
+      observacoes: 'Observação muito longa de teste, repetida para passar de uma página. '.repeat(250),
+      referencia: 'Referência comprida de teste. '.repeat(40),
+    });
+    for (let i = 0; i < 5; i += 1) {
+      const f = await db.adicionarFoto(lg.id, lg.sala.id, await foto(lg.imovel, 'sala.jpg', ` · longo ${i}`));
+      if (i === 0) await db.atualizarFoto(f.id, { patologias: ['fissura'], descricao: 'Descrição enorme de teste da foto. '.repeat(120) });
+    }
+    const totalD = (await ids(lg.id)).length;
+    await db.gravarAssinatura(lg.id, {
+      tipo: 'ciencia',
+      texto: textoTermoCiencia({ id: lg.id, data: new Date(), totalFotos: totalD }) + ' Cláusula longa de teste do termo.'.repeat(250),
+      inicio: new Date().toISOString(), idsFotosConferidas: await ids(lg.id),
+      ocupante: { nome: 'Pessoa Fictícia', documento: '0000000', assinatura: await assinatura(5) },
+      vistoriador: { nome: 'Vistoriador Teste', assinatura: await assinatura(6) },
+    });
+    try {
+      const sd = texto(await bytes(await gerarLaudo(lg.id, { responsavel, comprimir: false })));
+      out.d = {
+        paginas: paginas(sd), continuacao: sd.includes(comoNoPdf('Sala (continuação)')),
+        descricoes: sd.includes('Descrições completas'), diagramacao: diagramacao(sd),
+      };
+      await amostra('-longo', lg.id, { responsavel });
+    } catch (e) {
+      out.d = { erro: e.stack || e.message };
+    }
     return out;
   }, !!process.env.LAUDO_AMOSTRA);
 
@@ -165,4 +228,16 @@ export default async function ({ page, base, ok }) {
   ok(b.semCrea, 'laudo sem CREA/ART: mostra só o nome');
   ok(c.recusa && !c.rascunho && c.testemunha, 'laudo de recusa: Termo de Recusa com a testemunha');
   ok(c.nome === c.nomeEsperado, `laudo sem endereço: nome ${c.nome}`);
+  ok(a.concordancia, 'laudo: "Foto incluída … (não consta deste termo): 4." no singular');
+
+  const { d } = r;
+  ok(!d.erro, `laudo com textos longos: gera sem erro${d.erro ? ` — ${d.erro}` : ''}`);
+  ok(d.paginas >= a.paginas + 4, `laudo com textos longos: ${d.paginas} páginas (textos continuam nas seguintes)`);
+  ok(d.continuacao, 'laudo: ambiente que continua na outra página repete o título "(continuação)"');
+  ok(d.descricoes, 'laudo: descrição de foto longa sai inteira em "Descrições completas"');
+  for (const [nome, x] of Object.entries({ assinado: a, rascunho: b, recusa: c, longo: d })) {
+    const g = x.diagramacao ?? {};
+    ok(g.paginasLidas && g.semVazar, `laudo ${nome}: nenhum texto abaixo do limite do conteúdo (só rodapé/faixa)`);
+    ok(g.paginasLidas && g.semOrfao, `laudo ${nome}: nenhum título sozinho no pé da página`);
+  }
 }

@@ -164,12 +164,22 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
   const medir = (texto) => doc.getTextWidth(texto)
     + (doc.getFont().fontName === 'courier' ? 0 : texto.length * 0.003 * doc.getFontSize() * PT);
 
+  /** Quebra o texto em no máximo `maximo` linhas; se sobrar, a última termina em "…". */
+  function cortar(texto, largura, maximo) {
+    const linhas = quebrar(texto, largura);
+    if (linhas.length <= maximo) return linhas;
+    const resultado = linhas.slice(0, maximo);
+    let ultima = resultado[maximo - 1];
+    while (ultima && doc.getTextWidth(`${ultima}…`) > largura) ultima = ultima.slice(0, -1);
+    resultado[maximo - 1] = `${ultima.trimEnd()}…`;
+    return resultado;
+  }
+
   /**
-   * Texto com trechos de estilos diferentes, quebrado na largura. Cada trecho:
-   * { texto, estilo: 'normal'|'negrito'|'mono', cor, inteiro (não quebra no meio) }.
-   * Devolve a altura; com desenhar=false só mede.
+   * Quebra em linhas um texto com trechos de estilos diferentes. Cada trecho:
+   * { texto, estilo: 'normal'|'negrito'|'mono', cor, tamanho, inteiro (não quebra no meio) }.
    */
-  function textoRico(trechos, x, yy, largura, tamanho, desenhar = true) {
+  function comporRico(trechos, largura, tamanho) {
     const linhas = [[]];
     let pos = 0;
     let espaco = 0;
@@ -193,15 +203,21 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
         }
       }
     }
-    const passo = entrelinha(tamanho);
-    if (desenhar) {
-      linhas.forEach((linha, i) => {
-        for (const p of linha) {
-          fonte(p.t.estilo ?? 'normal', p.t.tamanho ?? tamanho, p.t.cor ?? TEXTO);
-          doc.text(p.texto, x + p.x, yy + i * passo);
-        }
-      });
+    return linhas;
+  }
+
+  function desenharLinhaRica(linha, x, yy, tamanho) {
+    for (const p of linha) {
+      fonte(p.t.estilo ?? 'normal', p.t.tamanho ?? tamanho, p.t.cor ?? TEXTO);
+      doc.text(p.texto, x + p.x, yy);
     }
+  }
+
+  /** Escreve (ou só mede, com desenhar=false) um texto rico num lugar fixo. Devolve a altura. */
+  function textoRico(trechos, x, yy, largura, tamanho, desenhar = true) {
+    const linhas = comporRico(trechos, largura, tamanho);
+    const passo = entrelinha(tamanho);
+    if (desenhar) linhas.forEach((linha, i) => desenharLinhaRica(linha, x, yy + i * passo, tamanho));
     return linhas.length * passo;
   }
 
@@ -215,7 +231,7 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
     doc.addImage(logo, 'PNG', MARGEM, 11.5, altura * medidasLogo.largura / medidasLogo.altura, altura, 'logo');
     fonte('normal', 8.5, CINZA);
     escrever(`Laudo de Vistoria Cautelar — ${imovel.id}`, DIREITA, 15, { align: 'right' });
-    if (imovel.endereco) escrever(quebrar(imovel.endereco, 110)[0], DIREITA, 19, { align: 'right' });
+    if (imovel.endereco) doc.text(cortar(imovel.endereco, 110, 1)[0], DIREITA, 19, { align: 'right' });
     doc.setDrawColor(...AZUL);
     doc.setLineWidth(0.5);
     doc.line(MARGEM, 22.5, DIREITA, 22.5);
@@ -229,8 +245,12 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
 
   const garantir = (altura) => { if (y + altura > FIM_CONTEUDO) novaPagina(); };
 
-  function titulo(numero, texto) {
-    garantir(22);
+  /**
+   * Título de seção. `seguinte` = altura do começo do que vem depois (parágrafo, tabela, quadro),
+   * para o título não ficar sozinho no pé da página.
+   */
+  function titulo(numero, texto, seguinte = 12) {
+    garantir(11.5 + seguinte);
     y += 5;
     fonte('negrito', 14, VERDE);
     escrever(String(numero), MARGEM, y);
@@ -240,12 +260,24 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
     y += 6.5;
   }
 
+  const trechosDe = (texto) => (typeof texto === 'string' ? negritos(texto) : texto);
+
+  /** Altura das primeiras linhas (até 3) de um parágrafo: o que o título antes dele reserva. */
+  const inicioParagrafo = (texto, tamanho = 10) =>
+    Math.min(comporRico(trechosDe(texto), UTIL, tamanho).length, 3) * entrelinha(tamanho);
+
+  /** Parágrafo que continua na página seguinte quando não cabe. */
   function paragrafo(texto, tamanho = 10) {
-    const trechos = typeof texto === 'string' ? negritos(texto) : texto;
-    const altura = textoRico(trechos, MARGEM, y, UTIL, tamanho, false);
-    garantir(altura);
-    textoRico(trechos, MARGEM, y + tamanho * PT, UTIL, tamanho);
-    y += altura + 2;
+    const passo = entrelinha(tamanho);
+    const linhas = comporRico(trechosDe(texto), UTIL, tamanho);
+    for (const [i, linha] of linhas.entries()) {
+      // a última linha não vai sozinha para a página seguinte: leva a penúltima junto
+      if (i >= 2 && i === linhas.length - 2 && y + 2 * passo > FIM_CONTEUDO) novaPagina();
+      garantir(passo);
+      desenharLinhaRica(linha, MARGEM, y + tamanho * PT, tamanho);
+      y += passo;
+    }
+    y += 2;
   }
 
   /**
@@ -256,8 +288,9 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
     const folga = 1.4;
     const passo = entrelinha(tamanho);
     const larguraUtil = (c) => c.largura - 2 * 1.8;
+    const titulos = colunas.map((c) => c.titulo);
     const desenharLinha = (celulas, cabecalhoLinha) => {
-      const conteudos = celulas.map((cel, i) => {
+      let conteudos = celulas.map((cel, i) => {
         const c = colunas[i];
         const dado = typeof cel === 'object' && cel !== null ? cel : { texto: cel };
         const estilo = cabecalhoLinha ? 'negrito' : (dado.estilo ?? c.estilo ?? 'normal');
@@ -265,25 +298,43 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
         fonte(estilo, tam);
         return { linhas: quebrar(dado.texto === '' || dado.texto == null ? '—' : dado.texto, larguraUtil(c)), estilo, tam, cor: cabecalhoLinha ? AZUL : (dado.cor ?? c.cor ?? TEXTO) };
       });
-      const altura = Math.max(...conteudos.map((k) => k.linhas.length)) * passo + 2 * folga;
-      if (y + altura > FIM_CONTEUDO) {
+      const pagina = () => {
         novaPagina();
-        if (!cabecalhoLinha && comCabecalho) desenharLinha(colunas.map((c) => c.titulo), true);
+        if (!cabecalhoLinha && comCabecalho) desenharLinha(titulos, true);
+      };
+      const desenharPedaco = (pedaco) => {
+        const altura = Math.max(...pedaco.map((k) => k.linhas.length)) * passo + 2 * folga;
+        let x = MARGEM;
+        pedaco.forEach((k, i) => {
+          const c = colunas[i];
+          const fundo = cabecalhoLinha ? FUNDO : c.fundo;
+          doc.setDrawColor(...LINHA);
+          doc.setLineWidth(0.25);
+          if (fundo) { doc.setFillColor(...fundo); doc.rect(x, y, c.largura, altura, 'FD'); } else doc.rect(x, y, c.largura, altura);
+          fonte(k.estilo, k.tam, k.cor);
+          if (k.linhas.length) doc.text(k.linhas, x + 1.8, y + folga + k.tam * PT * 0.95);
+          x += c.largura;
+        });
+        y += altura;
+      };
+      // linha maior que o espaço: pula de página; se nem numa página inteira couber, divide a linha
+      let noTopo = false;
+      for (;;) {
+        const altura = Math.max(...conteudos.map((k) => k.linhas.length)) * passo + 2 * folga;
+        if (y + altura <= FIM_CONTEUDO) { desenharPedaco(conteudos); return; }
+        const cabem = Math.floor((FIM_CONTEUDO - y - 2 * folga) / passo);
+        if (!noTopo && (cabem < 2 || altura <= FIM_CONTEUDO - INICIO_CONTEUDO - 15)) {
+          pagina();
+          noTopo = true;
+          continue;
+        }
+        desenharPedaco(conteudos.map((k) => ({ ...k, linhas: k.linhas.slice(0, cabem) })));
+        conteudos = conteudos.map((k) => ({ ...k, linhas: k.linhas.slice(cabem) }));
+        pagina();
+        noTopo = true;
       }
-      let x = MARGEM;
-      conteudos.forEach((k, i) => {
-        const c = colunas[i];
-        const fundo = cabecalhoLinha ? FUNDO : c.fundo;
-        doc.setDrawColor(...LINHA);
-        doc.setLineWidth(0.25);
-        if (fundo) { doc.setFillColor(...fundo); doc.rect(x, y, c.largura, altura, 'FD'); } else doc.rect(x, y, c.largura, altura);
-        fonte(k.estilo, k.tam, k.cor);
-        doc.text(k.linhas, x + 1.8, y + folga + k.tam * PT * 0.95);
-        x += c.largura;
-      });
-      y += altura;
     };
-    if (comCabecalho) desenharLinha(colunas.map((c) => c.titulo), true);
+    if (comCabecalho) desenharLinha(titulos, true);
     for (const l of linhas) desenharLinha(l, false);
     y += 3;
   }
@@ -375,7 +426,8 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
       fonte('normal', 8.5, CINZA);
       escrever(rotulo, x, y);
       fonte('normal', 10, TEXTO);
-      const linhas = quebrar(valor, larguraDado);
+      // até 2 linhas na capa (o texto completo está nas seções 3 e 4)
+      const linhas = cortar(valor, larguraDado, 2);
       doc.text(linhas, x, y + 4.6);
       maior = Math.max(maior, 4.6 + linhas.length * entrelinha(10));
     });
@@ -397,9 +449,9 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
   // 1–4: objetivo, método, identificação, características
   // =====================================================================
   novaPagina();
-  titulo(1, 'Objetivo');
+  titulo(1, 'Objetivo', inicioParagrafo(TEXTOS.objetivo));
   paragrafo(TEXTOS.objetivo);
-  titulo(2, 'Método');
+  titulo(2, 'Método', inicioParagrafo(TEXTOS.metodo(tipo)));
   paragrafo(TEXTOS.metodo(tipo));
 
   titulo(3, 'Identificação e localização');
@@ -441,6 +493,8 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
   const COLUNA = (UTIL - 6) / 2;
   const ALTURA_FOTO = 62;
   const TAM_LEGENDA = 8.5;
+  const MAX_LINHAS_DESCRICAO = 10;
+  const descricoesLongas = []; // descrição que não cabe na legenda sai inteira no fim da seção 5
 
   const legenda = ({ foto, ambiente, numero }) => {
     const local = rotuloDe(LOCAIS_FOTO, foto.local);
@@ -462,7 +516,18 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
       trechos.push({ texto: 'Patologia não informada', cor: CINZA });
     }
     trechos.push({ texto: '\n' });
-    if (foto.descricao) trechos.push({ texto: foto.descricao }, { texto: '\n' });
+    if (foto.descricao) {
+      fonte('normal', TAM_LEGENDA);
+      if (quebrar(foto.descricao, COLUNA - 2).length > MAX_LINHAS_DESCRICAO) {
+        for (const l of cortar(foto.descricao, COLUNA - 2, MAX_LINHAS_DESCRICAO)) {
+          trechos.push({ texto: l, inteiro: true }, { texto: '\n' });
+        }
+        trechos.push({ texto: 'Descrição completa no fim do relatório fotográfico.', cor: CINZA }, { texto: '\n' });
+        descricoesLongas.push({ numero, texto: foto.descricao });
+      } else {
+        trechos.push({ texto: foto.descricao }, { texto: '\n' });
+      }
+    }
     trechos.push({ texto: `Tirada em ${dataHoraSeg(foto.tiradaEm)}` });
     if (foto.entrouEm && Math.abs(new Date(foto.entrouEm) - new Date(foto.tiradaEm)) > 10 * 60000) {
       trechos.push({ texto: ` · no app em ${dataHoraSeg(foto.entrouEm)}` });
@@ -486,31 +551,45 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
     for (const b of blocos(trechos)) pos += textoRico(b, x, pos, COLUNA, TAM_LEGENDA);
   };
 
+  const ALTURA_TITULO_AMBIENTE = 10;
+  function tituloAmbiente(texto) {
+    y += 2;
+    doc.setFillColor(...VERDE);
+    doc.rect(MARGEM, y, 1.3, 5.5, 'F');
+    fonte('negrito', 11.5, AZUL);
+    doc.text(cortar(texto, UTIL - 4, 1)[0], MARGEM + 3.5, y + 4.3);
+    y += ALTURA_TITULO_AMBIENTE - 2;
+  }
+
   if (!grupos.length) paragrafo('Nenhuma foto registrada.');
   for (const { ambiente, fotos: lista } of grupos) {
     const linhas = [];
     for (let i = 0; i < lista.length; i += 2) linhas.push(lista.slice(i, i + 2));
-    linhas.forEach((par, i) => {
+    for (const par of linhas) {
       par.legendas = par.map(legenda);
       par.altura = ALTURA_FOTO + 2 + Math.max(...par.legendas.map(medirLegenda));
-      if (i === 0) par.altura += 10; // título do ambiente fica junto da primeira linha
-    });
+    }
     for (const [i, par] of linhas.entries()) {
-      garantir(par.altura);
       if (i === 0) {
-        y += 2;
-        doc.setFillColor(...VERDE);
-        doc.rect(MARGEM, y, 1.3, 5.5, 'F');
-        fonte('negrito', 11.5, AZUL);
-        escrever(ambiente.nome, MARGEM + 3.5, y + 4.3);
-        y += 8;
+        garantir(ALTURA_TITULO_AMBIENTE + par.altura); // título do ambiente junto da primeira linha
+        tituloAmbiente(ambiente.nome);
+      } else if (y + par.altura > FIM_CONTEUDO) {
+        novaPagina();
+        tituloAmbiente(`${ambiente.nome} (continuação)`);
       }
       for (const [j, item] of par.entries()) {
         const x = MARGEM + j * (COLUNA + 6);
         await fotoNaCaixa(item.foto, x, y, COLUNA, ALTURA_FOTO);
         escreverLegenda(par.legendas[j], x, y + ALTURA_FOTO + 2);
       }
-      y += par.altura - (i === 0 ? 10 : 0) + 5;
+      y += par.altura + 5;
+    }
+  }
+  if (descricoesLongas.length) {
+    garantir(ALTURA_TITULO_AMBIENTE + 3 * entrelinha(9));
+    tituloAmbiente('Descrições completas');
+    for (const { numero, texto } of descricoesLongas) {
+      paragrafo([{ texto: `Foto ${numero}: `, estilo: 'negrito', cor: AZUL }, { texto }], 9);
     }
   }
 
@@ -518,7 +597,7 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
   // 6–8: quadro-resumo, conclusão, termo
   // =====================================================================
   novaPagina();
-  titulo(6, 'Quadro-resumo das patologias');
+  titulo(6, 'Quadro-resumo das patologias', 15);
   const linhasResumo = [];
   let fotosComPatologia = 0;
   let semPatologia = 0;
@@ -553,22 +632,33 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
     paragrafo(`${plural(numeradas.length, 'foto registrada', 'fotos registradas')}: ${partesResumo.join('; ')}.`);
   }
 
-  titulo(7, 'Conclusão');
-  paragrafo(TEXTOS.conclusao({ conservacao, comPatologias: linhasResumo.length > 0, tipo }));
+  const textoConclusao = TEXTOS.conclusao({ conservacao, comPatologias: linhasResumo.length > 0, tipo });
+  titulo(7, 'Conclusão', inicioParagrafo(textoConclusao));
+  paragrafo(textoConclusao);
 
-  titulo(8, tipo === 'recusa' ? 'Termo de Recusa' : 'Termo de ciência');
+  // termo num quadro; se o texto for maior que o espaço, o quadro continua na página seguinte
   const textoTermo = assinatura ? assinatura.texto : 'Termo ainda não assinado.';
+  const passoTermo = entrelinha(10.5);
   fonte('normal', 10.5);
-  const linhasTermo = quebrar(textoTermo, UTIL - 10);
-  const alturaTermo = linhasTermo.length * entrelinha(10.5) + 8;
-  garantir(alturaTermo + 4);
+  let restoTermo = quebrar(textoTermo, UTIL - 10);
+  titulo(8, tipo === 'recusa' ? 'Termo de Recusa' : 'Termo de ciência',
+    2 + Math.min(restoTermo.length, 3) * passoTermo + 8);
   y += 2;
-  doc.setDrawColor(...AZUL);
-  doc.setLineWidth(0.5);
-  doc.rect(MARGEM, y, UTIL, alturaTermo);
-  fonte('normal', 10.5);
-  doc.text(linhasTermo, MARGEM + 5, y + 4 + 10.5 * PT);
-  y += alturaTermo + 4;
+  while (restoTermo.length) {
+    const cabem = Math.floor((FIM_CONTEUDO - y - 8) / passoTermo);
+    if (cabem < Math.min(2, restoTermo.length)) { novaPagina(); continue; }
+    const parte = restoTermo.slice(0, cabem);
+    restoTermo = restoTermo.slice(cabem);
+    const altura = parte.length * passoTermo + 8;
+    doc.setDrawColor(...AZUL);
+    doc.setLineWidth(0.5);
+    doc.rect(MARGEM, y, UTIL, altura);
+    fonte('normal', 10.5);
+    doc.text(parte, MARGEM + 5, y + 4 + 10.5 * PT);
+    y += altura;
+    if (restoTermo.length) novaPagina();
+  }
+  y += 4;
 
   if (assinatura) {
     if (tipo === 'recusa' && assinatura.motivoRecusa && !assinatura.texto.includes(assinatura.motivoRecusa)) {
@@ -636,8 +726,9 @@ export async function gerarLaudo(imovelId, { responsavel, comprimir = true } = {
   }
   const depois = numeradas.filter(({ foto }) => depoisDaAssinatura(foto)).map(({ numero }) => numero);
   if (depois.length) {
-    paragrafo(`${depois.length === 1 ? 'Foto incluída' : 'Fotos incluídas'} depois da assinatura (não constam deste termo): `
-      + `${depois.join(', ')}.`, 9);
+    paragrafo(depois.length === 1
+      ? `Foto incluída depois da assinatura (não consta deste termo): ${depois[0]}.`
+      : `Fotos incluídas depois da assinatura (não constam deste termo): ${depois.join(', ')}.`, 9);
   }
 
   // =====================================================================
