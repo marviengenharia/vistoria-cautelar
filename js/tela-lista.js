@@ -2,6 +2,8 @@
 import { listarImoveis, criarImovel } from './db.js';
 import { STATUS, RAIO_ESTACAS, estacaNumero, rotuloDe } from './dominio.js';
 import { esc, mostrarMensagem, CASINHA_SVG } from './util.js';
+import { imoveisSemBackup, montarBackup, registrarBackup } from './backup.js';
+import { compartilharArquivos } from './compartilhar.js';
 
 // Filtros continuam iguais ao voltar de um imóvel (enquanto o app estiver aberto).
 const memoria = { lado: 'LE', estaca: null, situacao: 'todos', busca: '' };
@@ -12,12 +14,16 @@ const LADOS_FILTRO = [
   { valor: 'ambos', rotulo: 'Os dois' },
 ];
 
+const ARQUIVOS_POR_VEZ = 10; // alguns celulares não aceitam muitos arquivos num compartilhamento só
+const DIAS_PARA_ALERTA = 2;
+
 function normalizar(texto) {
   return String(texto ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
 export async function telaLista(raiz) {
   const imoveis = (await listarImoveis()).map((im) => ({ ...im, _estaca: estacaNumero(im.estaca) }));
+  const semBackup = await imoveisSemBackup();
   imoveis.sort((a, b) => (a._estaca ?? Infinity) - (b._estaca ?? Infinity)
     || a.id.localeCompare(b.id, 'pt-BR', { numeric: true }));
 
@@ -39,6 +45,8 @@ export async function telaLista(raiz) {
     </header>
 
     <div class="pagina pagina-lista">
+      <div id="lugar-backup"></div>
+
       <div class="segmentos" role="group" aria-label="Lado da obra">
         ${LADOS_FILTRO.map((l) => `<button type="button" class="segmento" data-lado="${l.valor}">${l.rotulo}</button>`).join('')}
       </div>
@@ -181,6 +189,100 @@ export async function telaLista(raiz) {
     }
   });
 
+  // ---------- aviso "sem backup" ----------
+  // Dois toques: o 1º prepara os arquivos; o 2º abre o Compartilhar. No iPhone a folha de
+  // compartilhamento só abre se for chamada direto do toque, sem espera antes.
+  const lugarBackup = raiz.querySelector('#lugar-backup');
+  let lotes = null; // [{ arquivos: File[], ids: string[], feito: boolean }]
+  let preparadoEm = null;
+
+  function desenharBackup(pendentes) {
+    lotes = null;
+    if (!pendentes.length) {
+      lugarBackup.innerHTML = '';
+      return;
+    }
+    const n = pendentes.length;
+    const limite = Date.now() - DIAS_PARA_ALERTA * 24 * 60 * 60 * 1000;
+    const alerta = pendentes.some((p) => !p.desde || Date.parse(p.desde) < limite);
+    lugarBackup.innerHTML = `
+      <section class="aviso-backup" data-alerta="${alerta}" aria-label="Backup">
+        <p class="aviso-backup-texto"><b>${n}</b> ${n === 1 ? 'imóvel' : 'imóveis'} sem backup</p>
+        ${alerta ? `<p class="aviso-backup-ajuda">Tem imóvel sem backup há mais de ${DIAS_PARA_ALERTA} dias.</p>` : ''}
+        <div class="aviso-backup-botoes">
+          <button type="button" class="botao botao-largo" data-backup="preparar">
+            ${n === 1 ? `Fazer backup do ${esc(pendentes[0].id)}` : `Fazer backup dos ${n}`}</button>
+        </div>
+      </section>`;
+  }
+
+  function rotuloLote(lote, i) {
+    if (lote.arquivos.length === 1) return `Compartilhar ${lote.arquivos[0].name}`;
+    if (lotes.length === 1) return `Compartilhar ${lote.arquivos.length} arquivos`;
+    const inicio = i * ARQUIVOS_POR_VEZ + 1;
+    return `Compartilhar arquivos ${inicio} a ${inicio + lote.arquivos.length - 1}`;
+  }
+
+  async function prepararBackups(botao) {
+    botao.disabled = true;
+    try {
+      const pendentes = await imoveisSemBackup();
+      preparadoEm = new Date().toISOString(); // mudança feita depois disso continua sem backup
+      const arquivos = [];
+      for (const [i, p] of pendentes.entries()) {
+        botao.textContent = `Preparando ${i + 1} de ${pendentes.length}…`;
+        arquivos.push(await montarBackup(p.id));
+      }
+      lotes = [];
+      for (let i = 0; i < pendentes.length; i += ARQUIVOS_POR_VEZ) {
+        lotes.push({
+          arquivos: arquivos.slice(i, i + ARQUIVOS_POR_VEZ),
+          ids: pendentes.slice(i, i + ARQUIVOS_POR_VEZ).map((p) => p.id),
+          feito: false,
+        });
+      }
+      lugarBackup.querySelector('.aviso-backup-botoes').innerHTML = lotes.map((l, i) => `
+        <button type="button" class="botao botao-largo" data-lote="${i}">${esc(rotuloLote(l, i))}</button>`).join('');
+    } catch (erro) {
+      console.error(erro);
+      mostrarMensagem('Não foi possível preparar o backup: ' + erro.message, 'erro');
+      desenharBackup(await imoveisSemBackup());
+    }
+  }
+
+  function compartilharLote(botao) {
+    const lote = lotes[Number(botao.dataset.lote)];
+    // primeira coisa do toque, sem nenhum await antes (regra do iPhone)
+    const envio = compartilharArquivos(lote.arquivos, 'Backup da vistoria');
+    botao.disabled = true;
+    envio.then(async (resultado) => {
+      if (resultado === 'cancelado') {
+        botao.disabled = false; // continua disponível para tentar de novo
+        return;
+      }
+      await registrarBackup(lote.ids, preparadoEm);
+      lote.feito = true;
+      botao.textContent = 'Pronto ✓';
+      if (lotes.every((l) => l.feito)) {
+        const ids = lotes.flatMap((l) => l.ids);
+        mostrarMensagem(ids.length === 1 ? `Backup de ${ids[0]} feito.` : `Backup de ${ids.length} imóveis feito.`);
+        desenharBackup(await imoveisSemBackup());
+      }
+    }).catch((erro) => {
+      console.error(erro);
+      mostrarMensagem('Não foi possível fazer o backup: ' + erro.message, 'erro');
+      botao.disabled = false;
+    });
+  }
+
+  lugarBackup.addEventListener('click', (e) => {
+    const botao = e.target.closest('button');
+    if (!botao || botao.disabled) return;
+    if (botao.dataset.lote !== undefined) compartilharLote(botao);
+    else if (botao.dataset.backup === 'preparar') prepararBackups(botao);
+  });
+
+  desenharBackup(semBackup);
   desenhar();
   return async () => liberarUrls();
 }

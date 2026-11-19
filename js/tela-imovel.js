@@ -12,6 +12,8 @@ import { capturarGps } from './gps.js';
 import { prepararFoto } from './foto.js';
 import { telaAmbientes } from './tela-ambientes.js';
 import { telaAssinaturas } from './tela-assinaturas.js';
+import { montarBackup, registrarBackup } from './backup.js';
+import { compartilharArquivos } from './compartilhar.js';
 import {
   esc, dataHora, numeroBr, mostrarMensagem, abrirTelaCheia, CASINHA_SVG,
 } from './util.js';
@@ -334,6 +336,7 @@ export async function telaImovel(raiz, id, aba) {
         Criado em ${dataHora(imovel.criadoEm)}<br>
         <span id="ultima-alteracao">Última alteração: ${dataHora(imovel.atualizadoEm)}</span>
       </p>
+      <button type="button" class="botao botao-largo botao-secundario botao-backup" id="fazer-backup">Fazer backup deste imóvel</button>
       <button type="button" class="botao botao-perigo" id="excluir">Excluir este imóvel</button>`;
 
     const form = conteudo.querySelector('#form-dados');
@@ -378,6 +381,7 @@ export async function telaImovel(raiz, id, aba) {
     }
 
     function agendar(campoNome, valor, imediato = false) {
+      descartarBackupPronto(); // o arquivo preparado ficou velho
       pendentes.set(campoNome, valor);
       mostrarEstado('salvando', 'Salvando…');
       clearTimeout(temporizador);
@@ -459,6 +463,57 @@ export async function telaImovel(raiz, id, aba) {
       }
     });
     if (imovel.gps) botaoGps.textContent = 'Capturar GPS de novo';
+
+    // ----- backup -----
+    // Dois toques: o 1º prepara o arquivo; o 2º abre o Compartilhar. No iPhone a folha de
+    // compartilhamento só abre se for chamada direto do toque, sem espera antes.
+    const botaoBackup = conteudo.querySelector('#fazer-backup');
+    const ROTULO_BACKUP = 'Fazer backup deste imóvel';
+    let backupPronto = null; // { arquivo: File, preparadoEm: string }
+
+    function descartarBackupPronto() {
+      if (!backupPronto) return;
+      backupPronto = null;
+      botaoBackup.textContent = ROTULO_BACKUP;
+    }
+
+    async function prepararBackup() {
+      botaoBackup.disabled = true;
+      botaoBackup.textContent = 'Preparando o arquivo…';
+      try {
+        await gravar(); // entra no backup o que acabou de ser digitado
+        const preparadoEm = new Date().toISOString(); // mudança feita depois disso continua sem backup
+        const arquivo = await montarBackup(id);
+        backupPronto = { arquivo, preparadoEm };
+        botaoBackup.textContent = `Compartilhar ${arquivo.name}`;
+      } catch (erro) {
+        console.error(erro);
+        botaoBackup.textContent = ROTULO_BACKUP;
+        mostrarMensagem('Não foi possível preparar o backup: ' + erro.message, 'erro');
+      } finally {
+        botaoBackup.disabled = false;
+      }
+    }
+
+    botaoBackup.addEventListener('click', () => {
+      if (!backupPronto) {
+        prepararBackup();
+        return;
+      }
+      const pronto = backupPronto;
+      // primeira coisa do toque, sem nenhum await antes (regra do iPhone)
+      const envio = compartilharArquivos([pronto.arquivo], `Backup ${id}`);
+      botaoBackup.disabled = true;
+      envio.then(async (resultado) => {
+        if (resultado === 'cancelado') return; // o botão "Compartilhar" continua disponível
+        await registrarBackup([id], pronto.preparadoEm);
+        if (backupPronto === pronto) descartarBackupPronto();
+        mostrarMensagem(`Backup de ${id} feito.`);
+      }).catch((erro) => {
+        console.error(erro);
+        mostrarMensagem('Não foi possível fazer o backup: ' + erro.message, 'erro');
+      }).finally(() => { botaoBackup.disabled = false; });
+    });
 
     // ----- excluir -----
     conteudo.querySelector('#excluir').addEventListener('click', async () => {

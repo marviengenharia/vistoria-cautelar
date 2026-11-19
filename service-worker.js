@@ -18,6 +18,7 @@ const ARQUIVOS = [
   'js/util.js',
   'js/zip.js',
   'js/compartilhar.js',
+  'js/backup.js',
   'js/area-assinatura.js',
   'js/tela-lista.js',
   'js/tela-imovel.js',

@@ -340,6 +340,113 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   await mensagemTem('consta numa assinatura');
   ok(true, 'fachada assinada: "Trocar foto" mostra o aviso');
 
+  // ---------- backup ----------
+  // no Edge de teste não há folha de compartilhamento: o arquivo é "baixado" (o clique é só contado)
+  const espiarDownloads = () => page.evaluate(() => {
+    window.__baixados = [];
+    HTMLAnchorElement.prototype.click = function () { if (this.download) window.__baixados.push(this.download); };
+  });
+  const hoje = await page.evaluate(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  await page.goto(base + '#/');
+  await page.waitForSelector('.segmentos');
+  await espiarDownloads();
+  await page.waitForSelector('.aviso-backup');
+  ok(await page.$eval('.aviso-backup-texto', (p) => p.textContent.trim()) === '4 imóveis sem backup', 'tela inicial: "4 imóveis sem backup"');
+  ok(await page.$eval('.aviso-backup', (s) => s.dataset.alerta) === 'false', 'aviso sem cor de alerta (mudanças de hoje)');
+  ok(await page.$eval('.aviso-backup button', (b) => b.textContent.trim()) === 'Fazer backup dos 4', 'botão "Fazer backup dos 4"');
+  ok(await page.$eval('.aviso-backup', (s) => s.closest('.pagina-lista') && !s.closest('.topo')), 'aviso fica abaixo do placar, no início da lista');
+  await page.click('.aviso-backup button');
+  await page.waitForFunction(() => document.querySelector('.aviso-backup button')?.textContent.trim() === 'Compartilhar 4 arquivos', { timeout: 20000 });
+  ok(true, 'arquivos preparados: botão "Compartilhar 4 arquivos"');
+  await page.click('.aviso-backup button');
+  await page.waitForFunction(() => !document.querySelector('.aviso-backup'), { timeout: 10000 });
+  const baixados = await page.evaluate(() => window.__baixados.slice().sort());
+  ok(baixados.join() === ['IM-001', 'IM-002', 'IM-003', 'IM-004'].map((i) => `${i}_${hoje}.zip`).join(),
+    `os 4 arquivos "baixados" e o aviso some (${baixados})`);
+  ok((await page.evaluate(async () => (await import('/js/backup.js')).imoveisSemBackup())).length === 0, 'backup registrado para os 4');
+
+  // mudança só de patologia: o imóvel volta a ficar sem backup
+  await page.evaluate(async () => {
+    const db = await import('/js/db.js');
+    const [f] = (await db.listarFotosDoImovel('IM-001')).filter((x) => x.local !== 'fachada');
+    await db.atualizarFoto(f.id, { descricao: 'mudou depois do backup' });
+  });
+  await page.goto(base + '#/imovel/IM-001/dados');
+  await page.waitForSelector('#form-dados');
+  await page.goto(base + '#/');
+  await page.waitForSelector('.aviso-backup');
+  ok(await page.$eval('.aviso-backup-texto', (p) => p.textContent.trim()) === '1 imóvel sem backup'
+    && await page.$eval('.aviso-backup button', (b) => b.textContent.trim()) === 'Fazer backup do IM-001',
+  'mudança numa foto: "1 imóvel sem backup" e "Fazer backup do IM-001"');
+
+  // botão na tela do imóvel (aba Dados, acima de "Excluir")
+  await page.goto(base + '#/imovel/IM-001/dados');
+  await page.waitForSelector('#fazer-backup');
+  ok(await page.$eval('#fazer-backup', (b) => b.nextElementSibling?.id === 'excluir' && b.textContent.trim() === 'Fazer backup deste imóvel'),
+    'aba Dados: "Fazer backup deste imóvel" logo acima de "Excluir"');
+  await limparMensagem();
+  await page.$eval('#fazer-backup', (b) => b.scrollIntoView({ block: 'center' }));
+  await page.click('#fazer-backup');
+  await page.waitForFunction((n) => document.querySelector('#fazer-backup').textContent.trim() === `Compartilhar ${n}`, { timeout: 20000 }, `IM-001_${hoje}.zip`);
+  ok(true, `imóvel: botão vira "Compartilhar IM-001_${hoje}.zip"`);
+  // desistiu na folha de compartilhamento: nada registrado, o botão continua para tentar de novo
+  await page.evaluate(() => {
+    navigator.canShare = () => true;
+    navigator.share = () => Promise.reject(new DOMException('desistiu', 'AbortError'));
+  });
+  await page.click('#fazer-backup');
+  await page.waitForFunction(() => !document.querySelector('#fazer-backup').disabled);
+  const aposCancelar = await page.evaluate(async () => ({
+    botao: document.querySelector('#fazer-backup').textContent.trim(),
+    pendentes: (await (await import('/js/backup.js')).imoveisSemBackup()).map((p) => p.id).join(),
+  }));
+  ok(aposCancelar.botao === `Compartilhar IM-001_${hoje}.zip` && aposCancelar.pendentes === 'IM-001',
+    `cancelado: backup não registrado e "Compartilhar" continua (${JSON.stringify(aposCancelar)})`);
+  await page.evaluate(() => { delete navigator.canShare; delete navigator.share; window.__baixados = []; });
+  await page.click('#fazer-backup');
+  await mensagemTem('Backup de IM-001 feito.');
+  ok((await page.evaluate(() => window.__baixados)).join() === `IM-001_${hoje}.zip`
+    && await page.$eval('#fazer-backup', (b) => b.textContent.trim()) === 'Fazer backup deste imóvel',
+  'imóvel: arquivo "baixado", mensagem "Backup de IM-001 feito." e o botão volta ao normal');
+  await page.goto(base + '#/');
+  await page.waitForSelector('.segmentos');
+  ok(!(await page.$('.aviso-backup')), 'sem pendentes, o aviso some');
+
+  // mais de 2 dias sem backup: aviso em cor de alerta
+  const gravarDireto = (atualizadoEm, backupEm) => page.evaluate((a, bk) => new Promise((res, rej) => {
+    const q = indexedDB.open('vistoria-cautelar');
+    q.onsuccess = () => {
+      const tx = q.result.transaction(['imoveis', 'config'], 'readwrite');
+      const imoveis = tx.objectStore('imoveis');
+      const config = tx.objectStore('config');
+      imoveis.get('IM-002').onsuccess = (e) => imoveis.put({ ...e.target.result, atualizadoEm: a });
+      config.get('backups').onsuccess = (e) => config.put({ ...e.target.result, 'IM-002': bk }, 'backups');
+      tx.oncomplete = () => { q.result.close(); res(); };
+      tx.onerror = () => rej(tx.error);
+    };
+  }), atualizadoEm, backupEm);
+  const diasAtras = (d) => new Date(Date.now() - d * 864e5).toISOString();
+  await gravarDireto(new Date().toISOString(), diasAtras(3));
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.waitForSelector('.aviso-backup');
+  ok(await page.$eval('.aviso-backup', (s) => s.dataset.alerta) === 'false', 'mudança recente (backup antigo): ainda sem alerta');
+  await gravarDireto(diasAtras(2.5), diasAtras(3));
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.waitForSelector('.aviso-backup');
+  const alerta = await page.$eval('.aviso-backup', (s) => ({ attr: s.dataset.alerta, cor: getComputedStyle(s).borderLeftColor }));
+  const corPerigo = await page.evaluate(() => {
+    const t = document.createElement('i');
+    t.style.color = 'var(--perigo)';
+    document.body.append(t);
+    const c = getComputedStyle(t).color;
+    t.remove();
+    return c;
+  });
+  ok(alerta.attr === 'true' && alerta.cor === corPerigo, `sem backup há mais de 2 dias: aviso em cor de alerta (${alerta.cor})`);
+
   // ---------- sem internet ----------
   await pararServidor();
   await page.goto(base + '#/');

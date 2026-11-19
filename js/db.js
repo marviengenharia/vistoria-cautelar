@@ -42,6 +42,16 @@ const bancoPronto = openDB(NOME_BANCO, VERSAO_BANCO, {
 const novoId = (prefixo) => `${prefixo}-${crypto.randomUUID()}`;
 const agora = () => new Date().toISOString();
 
+/**
+ * Marca a hora da mudança no imóvel, dentro da transação de quem mudou algo dele
+ * (ambiente, foto, assinatura). É o que diz se o imóvel está "sem backup".
+ */
+async function marcarMudanca(tx, imovelId) {
+  const imoveis = tx.objectStore('imoveis');
+  const imovel = await imoveis.get(imovelId);
+  if (imovel) await imoveis.put({ ...imovel, atualizadoEm: agora() });
+}
+
 /** IM-001, IM-002, ... */
 export function formatarId(numero) {
   return `IM-${String(numero).padStart(3, '0')}`;
@@ -87,6 +97,19 @@ export async function atualizarImovel(id, alteracoes) {
   return novo;
 }
 
+/** O imóvel com ambientes, fotos e assinaturas, lidos de uma vez (retrato consistente para o backup). */
+export async function obterImovelCompleto(id) {
+  const db = await bancoPronto;
+  const tx = db.transaction(['imoveis', 'ambientes', 'fotos', 'assinaturas']);
+  const doImovel = (nome) => tx.objectStore(nome).index('imovelId').getAll(id);
+  const [imovel, ambientes, fotos, assinaturas] = await Promise.all([
+    tx.objectStore('imoveis').get(id), doImovel('ambientes'), doImovel('fotos'), doImovel('assinaturas'),
+  ]);
+  await tx.done;
+  if (!imovel) throw new Error(`Imóvel ${id} não encontrado.`);
+  return { imovel, ambientes, fotos, assinaturas };
+}
+
 /** Apaga o imóvel com todos os ambientes e fotos dele. */
 export async function excluirImovel(id) {
   const db = await bancoPronto;
@@ -110,7 +133,10 @@ export async function listarAmbientes(imovelId) {
 export async function criarAmbiente(imovelId, nome) {
   const db = await bancoPronto;
   const ambiente = { id: novoId('AMB'), imovelId, nome, criadoEm: agora() };
-  await db.add('ambientes', ambiente);
+  const tx = db.transaction(['ambientes', 'imoveis'], 'readwrite');
+  await tx.objectStore('ambientes').add(ambiente);
+  await marcarMudanca(tx, imovelId);
+  await tx.done;
   return ambiente;
 }
 
@@ -127,14 +153,11 @@ export async function excluirAmbiente(ambienteId) {
   const imovel = await imoveis.get(ambiente.imovelId);
   const indice = tx.objectStore('fotos').index('ambienteId');
   for (let c = await indice.openCursor(ambienteId); c; c = await c.continue()) {
-    if (imovel?.fachada?.fotoId === c.value.id) {
-      imovel.fachada = null;
-      imovel.atualizadoEm = agora();
-      await imoveis.put(imovel);
-    }
+    if (imovel?.fachada?.fotoId === c.value.id) imovel.fachada = null;
     await c.delete();
   }
   await tx.objectStore('ambientes').delete(ambienteId);
+  if (imovel) await imoveis.put({ ...imovel, atualizadoEm: agora() });
   await tx.done;
 }
 
@@ -168,7 +191,10 @@ function registroFoto(imovelId, ambienteId, { foto, miniatura, hash, tiradaEm, o
 export async function adicionarFoto(imovelId, ambienteId, processada) {
   const db = await bancoPronto;
   const registro = registroFoto(imovelId, ambienteId, processada);
-  await db.add('fotos', registro);
+  const tx = db.transaction(['fotos', 'imoveis'], 'readwrite');
+  await tx.objectStore('fotos').add(registro);
+  await marcarMudanca(tx, imovelId);
+  await tx.done;
   return registro;
 }
 
@@ -188,15 +214,17 @@ const CAMPOS_CLASSIFICACAO = ['patologias', 'local', 'abertura', 'descricao'];
 /** Grava a classificação da foto (patologias, local, abertura, descrição). A imagem nunca muda. */
 export async function atualizarFoto(id, alteracoes) {
   const db = await bancoPronto;
-  const tx = db.transaction('fotos', 'readwrite');
-  const atual = await tx.store.get(id);
+  const tx = db.transaction(['fotos', 'imoveis'], 'readwrite');
+  const fotos = tx.objectStore('fotos');
+  const atual = await fotos.get(id);
   if (!atual) throw new Error('Foto não encontrada.');
   // lista branca: só a classificação muda; imagem, horas, imóvel e ambiente ficam como estão
   const nova = { ...atual };
   for (const campo of CAMPOS_CLASSIFICACAO) {
     if (campo in alteracoes) nova[campo] = alteracoes[campo];
   }
-  await tx.store.put(nova);
+  await fotos.put(nova);
+  await marcarMudanca(tx, atual.imovelId);
   await tx.done;
   return nova;
 }
@@ -209,10 +237,9 @@ export async function excluirFoto(id) {
     if ((await idsAssinadasNaTransacao(tx, foto.imovelId)).has(id)) throw new Error(FOTO_ASSINADA);
     const imoveis = tx.objectStore('imoveis');
     const imovel = await imoveis.get(foto.imovelId);
-    if (imovel?.fachada?.fotoId === id) {
-      imovel.fachada = null;
-      imovel.atualizadoEm = agora();
-      await imoveis.put(imovel);
+    if (imovel) {
+      const fachada = imovel.fachada?.fotoId === id ? null : imovel.fachada;
+      await imoveis.put({ ...imovel, fachada, atualizadoEm: agora() });
     }
     await tx.objectStore('fotos').delete(id);
   }
@@ -345,11 +372,10 @@ export async function gravarAssinatura(imovelId, dados) {
     throw new Error(FOTOS_MUDARAM);
   }
   await tx.objectStore('assinaturas').add(assinatura);
-  if (dados.tipo === 'ciencia') {
-    const imovel = await tx.objectStore('imoveis').get(imovelId);
-    if (imovel && ['pendente', 'ausente', 'revisitar'].includes(imovel.status)) {
-      await tx.objectStore('imoveis').put({ ...imovel, status: 'vistoriado', atualizadoEm: agora() });
-    }
+  const imovel = await tx.objectStore('imoveis').get(imovelId);
+  if (imovel) {
+    const vistoriado = dados.tipo === 'ciencia' && ['pendente', 'ausente', 'revisitar'].includes(imovel.status);
+    await tx.objectStore('imoveis').put({ ...imovel, ...(vistoriado && { status: 'vistoriado' }), atualizadoEm: agora() });
   }
   await tx.done;
   return assinatura;
