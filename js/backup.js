@@ -1,7 +1,10 @@
 // Backup de um imóvel: um arquivo .zip com os dados (imovel.json), as fotos e as assinaturas.
 // As imagens vão para o zip byte a byte, sem alteração (o hash e o código continuam valendo).
-import { obterImovelCompleto, listarImoveis, obterConfig, gravarConfig } from './db.js';
-import { criarZip } from './zip.js';
+import {
+  obterImovelCompleto, listarImoveis, obterConfig, gravarConfig, codigoDaAssinatura, restaurarImovel,
+} from './db.js';
+import { criarZip, lerZip } from './zip.js';
+import { impressaoDigital } from './foto.js';
 
 const FORMATO = 1;
 const PESSOAS = ['ocupante', 'testemunha', 'vistoriador'];
@@ -49,6 +52,83 @@ export async function montarBackup(imovelId) {
 
   const zip = await criarZip(arquivos);
   return new File([zip], `${imovelId}_${dataLocal()}.zip`, { type: 'application/zip' });
+}
+
+const NAO_E_DO_APP = 'Este arquivo não foi feito pelo app.';
+
+/**
+ * Lê um arquivo de backup e confere tudo antes de qualquer gravação: cada foto com o hash dela,
+ * cada assinatura com o código dela e cada foto assinada com o hash que foi assinado.
+ * Se algo não bater, lança um Error "IM-012_2026-11-19.zip: motivo".
+ * @returns {Promise<{ id: string, atualizadoEm: string, dados: object }>}
+ */
+export async function lerBackup(arquivo) {
+  const falha = (motivo) => new Error(`${arquivo.name}: ${motivo}`);
+  let mapa;
+  try {
+    mapa = await lerZip(arquivo);
+  } catch (erro) {
+    throw falha(erro.message);
+  }
+  let json;
+  try {
+    json = JSON.parse(new TextDecoder().decode(mapa.get('imovel.json')));
+  } catch {
+    throw falha(NAO_E_DO_APP);
+  }
+  if (typeof json?.formato === 'number' && json.formato > FORMATO) {
+    throw falha('este backup foi feito por uma versão mais nova do app. Atualize o app e tente de novo.');
+  }
+  const { imovel, ambientes, fotos, assinaturas } = json ?? {};
+  const id = imovel?.id;
+  const listas = [ambientes, fotos, assinaturas];
+  if (json?.formato !== FORMATO || typeof id !== 'string' || !listas.every(Array.isArray)
+    || !listas.flat().every((r) => r?.imovelId === id && typeof r.id === 'string')) {
+    throw falha(NAO_E_DO_APP);
+  }
+
+  const fotosProntas = [];
+  for (const [i, f] of fotos.entries()) {
+    const bytes = mapa.get(`fotos/${f.id}.jpg`);
+    if (!bytes) throw falha(`falta a foto ${i + 1} no arquivo.`);
+    const blob = new Blob([bytes], { type: 'image/jpeg' });
+    if ((await impressaoDigital(blob)) !== f.hash) throw falha(`a foto ${i + 1} não confere com o código de verificação.`);
+    const mini = mapa.get(`miniaturas/${f.id}.jpg`);
+    fotosProntas.push({ ...f, blob, miniatura: mini ? new Blob([mini], { type: 'image/jpeg' }) : null });
+  }
+
+  const assinaturasProntas = [];
+  for (const [i, a] of assinaturas.entries()) {
+    const registro = { ...a };
+    for (const papel of PESSOAS) {
+      const caminho = a[papel]?.assinatura;
+      if (!caminho) continue;
+      const bytes = mapa.get(caminho);
+      if (!bytes) throw falha(`falta a imagem da assinatura ${i + 1} no arquivo.`);
+      registro[papel] = { ...a[papel], assinatura: new Blob([bytes], { type: 'image/png' }) };
+    }
+    if (!Array.isArray(a.fotos) || (await codigoDaAssinatura(registro)) !== a.codigo) {
+      throw falha(`a assinatura ${i + 1} não confere com o código de verificação.`);
+    }
+    for (const assinada of a.fotos) {
+      const n = fotos.findIndex((f) => f.id === assinada.id);
+      if (n < 0) throw falha(`falta no arquivo uma foto da assinatura ${i + 1}.`);
+      if (fotos[n].hash !== assinada.hash) throw falha(`a foto ${n + 1} não é a mesma que foi assinada.`);
+    }
+    assinaturasProntas.push(registro);
+  }
+
+  return {
+    id,
+    atualizadoEm: imovel.atualizadoEm ?? null,
+    dados: { geradoEm: json.geradoEm ?? null, imovel, ambientes, fotos: fotosProntas, assinaturas: assinaturasProntas },
+  };
+}
+
+/** Grava o imóvel lido por lerBackup (substitui o que houver) e conta como backup feito. */
+export async function restaurarBackup({ id, dados }) {
+  await restaurarImovel(dados);
+  await registrarBackup([id], dados.geradoEm ?? new Date().toISOString());
 }
 
 /**

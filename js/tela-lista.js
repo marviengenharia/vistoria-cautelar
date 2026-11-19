@@ -1,8 +1,8 @@
 // Tela inicial: fotos das fachadas em grade, filtro de lado e "perto da estaca".
-import { listarImoveis, criarImovel } from './db.js';
+import { listarImoveis, criarImovel, obterImovel } from './db.js';
 import { STATUS, RAIO_ESTACAS, estacaNumero, rotuloDe } from './dominio.js';
-import { esc, mostrarMensagem, CASINHA_SVG } from './util.js';
-import { imoveisSemBackup, montarBackup, registrarBackup } from './backup.js';
+import { esc, mostrarMensagem, CASINHA_SVG, dataHora } from './util.js';
+import { imoveisSemBackup, montarBackup, registrarBackup, lerBackup, restaurarBackup } from './backup.js';
 import { compartilharArquivos } from './compartilhar.js';
 
 // Filtros continuam iguais ao voltar de um imóvel (enquanto o app estiver aberto).
@@ -71,6 +71,9 @@ export async function telaLista(raiz) {
       </details>
 
       <div id="grupos"></div>
+
+      <label class="link-restaurar" id="restaurar"><span>Restaurar backup</span>
+        <input type="file" accept=".zip,application/zip" multiple id="entrada-restaurar" hidden></label>
     </div>
 
     <button type="button" class="botao-novo" id="novo-imovel">+ Imóvel</button>
@@ -280,6 +283,41 @@ export async function telaLista(raiz) {
     if (!botao || botao.disabled) return;
     if (botao.dataset.lote !== undefined) compartilharLote(botao);
     else if (botao.dataset.backup === 'preparar') prepararBackups(botao);
+  });
+
+  // ---------- restaurar backup (uso raro: celular novo) ----------
+  // Cada arquivo é conferido antes de gravar; o que falhar é avisado e o próximo segue.
+  const entradaRestaurar = raiz.querySelector('#entrada-restaurar');
+  entradaRestaurar.addEventListener('change', async () => {
+    const arquivos = [...entradaRestaurar.files];
+    entradaRestaurar.value = '';
+    if (!arquivos.length) return;
+    const rotulo = raiz.querySelector('#restaurar span');
+    let restaurados = 0;
+    let problemas = 0;
+    let mantidos = 0;
+    for (const [i, arquivo] of arquivos.entries()) {
+      rotulo.textContent = `Restaurando ${i + 1} de ${arquivos.length}…`;
+      try {
+        const lido = await lerBackup(arquivo);
+        const atual = await obterImovel(lido.id);
+        if (atual && !confirm(`${lido.id} já existe neste celular (alterado em ${dataHora(atual.atualizadoEm ?? atual.criadoEm)}). `
+          + `O backup é de ${dataHora(lido.atualizadoEm ?? lido.dados.geradoEm)}. Substituir pelo backup?`)) {
+          mantidos += 1;
+          continue;
+        }
+        await restaurarBackup(lido);
+        restaurados += 1;
+      } catch (erro) {
+        problemas += 1;
+        alert(erro.message.startsWith(`${arquivo.name}:`) ? erro.message : `${arquivo.name}: ${erro.message}`);
+      }
+    }
+    const partes = [`${restaurados} ${restaurados === 1 ? 'imóvel restaurado' : 'imóveis restaurados'}`];
+    if (problemas) partes.push(`${problemas} com problema`);
+    if (mantidos) partes.push(mantidos === 1 ? '1 mantido como estava' : `${mantidos} mantidos como estavam`);
+    window.dispatchEvent(new HashChangeEvent('hashchange')); // desenha a lista de novo, com os restaurados
+    mostrarMensagem(partes.join(', '), problemas ? 'erro' : 'normal');
   });
 
   desenharBackup(semBackup);

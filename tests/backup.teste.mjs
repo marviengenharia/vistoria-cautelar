@@ -1,5 +1,5 @@
 // ZIP (criar/ler) e compartilhar arquivos.
-export default async function ({ page, base, ok }) {
+export default async function ({ page, browser, base, ok }) {
   await page.goto(base + 'manifest.json');
   const r = await page.evaluate(async () => {
     const { criarZip, lerZip } = await import('/js/zip.js');
@@ -193,4 +193,182 @@ export default async function ({ page, base, ok }) {
   ok(!b.depoisRegistrar && b.configBackups, 'registrarBackup tira o imóvel da lista e grava em config "backups"');
   ok(Object.keys(b.volta).length === 8 && Object.values(b.volta).every(Boolean), `cada mudança volta para "sem backup" (${JSON.stringify(b.volta)})`);
   ok(b.soOOutro, 'mudança num imóvel não afeta o backup de outro');
+
+  // ---------- restaurar ----------
+  // No celular de origem: monta o backup e versões adulteradas (dados de teste, não são fotos reais).
+  const origem = await page.evaluate(async () => {
+    const db = await import('/js/db.js');
+    const { montarBackup } = await import('/js/backup.js');
+    const { criarZip, lerZip } = await import('/js/zip.js');
+    const { impressaoDigital } = await import('/js/foto.js');
+    const jpg = (n) => new Blob([new Uint8Array(1200 + n).map((_, i) => (i * 13 + n) & 255)], { type: 'image/jpeg' });
+    const png = (n) => new Blob([new Uint8Array(600 + n).map((_, i) => (i * 7 + n) & 255)], { type: 'image/png' });
+    const processada = async (n) => { const foto = jpg(n); return { foto, miniatura: jpg(n + 50), hash: await impressaoDigital(foto) }; };
+    const base64 = async (blob) => {
+      const b = new Uint8Array(await blob.arrayBuffer());
+      let s = '';
+      for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+      return btoa(s);
+    };
+
+    const im = await db.criarImovel();
+    const id = im.id;
+    await db.atualizarImovel(id, { endereco: 'Rua Restaurar, 2', estaca: '50', lado: 'LD' });
+    await db.definirFachada(id, await processada(10));
+    const sala = await db.criarAmbiente(id, 'Sala');
+    const f1 = await db.adicionarFoto(id, sala.id, await processada(11));
+    await db.atualizarFoto(f1.id, { patologias: ['trinca'], local: 'parede', abertura: 0.5, descricao: 'teste' });
+    const ids = (await db.listarFotosDoImovel(id)).map((f) => f.id);
+    await db.gravarAssinatura(id, {
+      tipo: 'ciencia', texto: 'termo de teste', inicio: new Date().toISOString(), idsFotosConferidas: ids,
+      ocupante: { nome: 'Pessoa Teste', documento: '111', assinatura: png(5) },
+      testemunha: { nome: 'Testemunha Teste', assinatura: png(6) },
+      vistoriador: { nome: 'Vistoriador Teste', assinatura: png(7) },
+    });
+    const completo = await db.obterImovelCompleto(id);
+    const arquivo = await montarBackup(id);
+    const mapa = await lerZip(arquivo);
+    const json = JSON.parse(new TextDecoder().decode(mapa.get('imovel.json')));
+
+    // refaz o zip com o CRC certo, só com o conteúdo trocado (adulteração "caprichada")
+    const adulterado = async (mudar) => {
+      const m = new Map([...mapa].map(([k, v]) => [k, v.slice()]));
+      const j = JSON.parse(new TextDecoder().decode(m.get('imovel.json')));
+      await mudar(m, j);
+      m.set('imovel.json', new TextEncoder().encode(JSON.stringify(j)));
+      return base64(await criarZip([...m].map(([nome, dados]) => ({ nome, dados }))));
+    };
+    const trocada = 1; // segunda foto do imovel.json
+    const idTrocada = json.fotos[trocada].id;
+    // byte trocado sem refazer o CRC: o zip acusa dano
+    const cru = new Uint8Array(await arquivo.arrayBuffer());
+    cru[Math.floor(cru.length / 2)] ^= 0xff;
+    const imagens = async (p) => ({ ...p, assinatura: await base64(p.assinatura) });
+
+    return {
+      id,
+      nome: arquivo.name,
+      zip: await base64(arquivo),
+      fotoTrocadaN: trocada + 1,
+      fotoByte: await adulterado((m) => { m.get(`fotos/${idTrocada}.jpg`)[100] ^= 0xff; }),
+      // troca a foto E o hash dela no JSON: a foto confere consigo, mas não é a que foi assinada
+      fotoNaoAssinada: await adulterado(async (m, j) => {
+        const b = m.get(`fotos/${idTrocada}.jpg`);
+        b[100] ^= 0xff;
+        j.fotos[trocada].hash = await impressaoDigital(new Blob([b]));
+      }),
+      pngByte: await adulterado((m, j) => { m.get(j.assinaturas[0].testemunha.assinatura)[50] ^= 0xff; }),
+      formato2: await adulterado((m, j) => { j.formato = 2; }),
+      danificado: await base64(new Blob([cru])),
+      imovel: { ...completo.imovel, fachada: { ...completo.imovel.fachada, miniatura: null } },
+      fachadaMini64: await base64(completo.imovel.fachada.miniatura),
+      ambientes: completo.ambientes,
+      fotos: await Promise.all(completo.fotos.map(async ({ blob, miniatura, ...f }) => (
+        { ...f, blob64: await base64(blob), mini64: await base64(miniatura) }))),
+      assinaturas: await Promise.all(completo.assinaturas.map(async (a) => ({
+        ...a,
+        ocupante: await imagens(a.ocupante),
+        testemunha: await imagens(a.testemunha),
+        vistoriador: await imagens(a.vistoriador),
+      }))),
+    };
+  });
+
+  // Celular novo: perfil limpo (outro contexto do navegador, sem nada gravado).
+  const contexto = await browser.createBrowserContext();
+  const novo = await contexto.newPage();
+  const errosNovo = [];
+  novo.on('pageerror', (e) => errosNovo.push(e.message));
+  await novo.goto(base + 'manifest.json');
+  const r2 = await novo.evaluate(async (o) => {
+    const db = await import('/js/db.js');
+    const { lerBackup, restaurarBackup, imoveisSemBackup } = await import('/js/backup.js');
+    const { impressaoDigital } = await import('/js/foto.js');
+    const { FOTO_ASSINADA } = await import('/js/dominio.js');
+    const out = {};
+    const deBase64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+    const arquivo = (s) => new File([deBase64(s)], o.nome, { type: 'application/zip' });
+    const igual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+    const bytesDe = async (blob) => new Uint8Array(await blob.arrayBuffer());
+    // JSON com chaves em ordem (para comparar registros)
+    const canonico = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x)
+      ? Object.fromEntries(Object.keys(x).sort().map((c) => [c, x[c]])) : x));
+    const porId = (lista) => [...lista].sort((a, b) => a.id.localeCompare(b.id));
+    const erroDe = async (s) => { try { await lerBackup(arquivo(s)); return 'nao lancou'; } catch (e) { return e.message; } };
+
+    out.erros = {
+      fotoByte: await erroDe(o.fotoByte),
+      pngByte: await erroDe(o.pngByte),
+      fotoNaoAssinada: await erroDe(o.fotoNaoAssinada),
+      formato2: await erroDe(o.formato2),
+      danificado: await erroDe(o.danificado),
+    };
+    out.nadaGravado = (await db.listarImoveis()).length === 0;
+
+    const lido = await lerBackup(arquivo(o.zip));
+    out.lido = lido.id === o.id && lido.atualizadoEm === o.imovel.atualizadoEm;
+    await restaurarBackup(lido);
+    const { imovel, ambientes, fotos, assinaturas } = await db.obterImovelCompleto(o.id);
+
+    out.imovel = canonico({ ...imovel, fachada: { ...imovel.fachada, miniatura: null } }) === canonico(o.imovel);
+    out.miniaturaFachada = imovel.fachada.miniatura instanceof Blob
+      && igual(await bytesDe(imovel.fachada.miniatura), deBase64(o.fachadaMini64));
+    out.ambientes = canonico(porId(ambientes)) === canonico(porId(o.ambientes));
+    out.fotos = fotos.length === o.fotos.length && (await Promise.all(o.fotos.map(async ({ blob64, mini64, ...orig }) => {
+      const f = fotos.find((x) => x.id === orig.id);
+      const { blob, miniatura, ...resto } = f;
+      return canonico(resto) === canonico(orig)
+        && igual(await bytesDe(blob), deBase64(blob64)) && igual(await bytesDe(miniatura), deBase64(mini64))
+        && (await impressaoDigital(blob)) === f.hash && blob.type === 'image/jpeg';
+    }))).every(Boolean);
+    const [a] = assinaturas;
+    const [oa] = o.assinaturas;
+    const pessoas = ['ocupante', 'testemunha', 'vistoriador'];
+    const semImagens = (x) => ({ ...x, ...Object.fromEntries(pessoas.map((p) => [p, { ...x[p], assinatura: null }])) });
+    out.assinatura = assinaturas.length === 1
+      && canonico(semImagens(a)) === canonico(semImagens(oa))
+      && (await db.codigoDaAssinatura(a)) === oa.codigo
+      && pessoas.every((p) => a[p].assinatura.type === 'image/png')
+      && (await Promise.all(pessoas.map(async (p) => igual(await bytesDe(a[p].assinatura), deBase64(oa[p].assinatura)))))
+        .every(Boolean);
+    try { await db.excluirFoto(fotos[0].id); out.trava = 'apagou'; } catch (e) { out.trava = e.message === FOTO_ASSINADA; }
+    out.semPendencia = !(await imoveisSemBackup()).some((p) => p.id === o.id);
+
+    // a numeração continua depois do restaurado
+    out.proximo = (await db.criarImovel()).id === db.formatarId(Number(o.id.slice(3)) + 1);
+
+    // restaurar de novo por cima: o que foi feito depois some, volta tudo como no backup
+    await db.criarAmbiente(o.id, 'Quarto a mais');
+    await db.atualizarImovel(o.id, { endereco: 'Mudou' });
+    await restaurarBackup(await lerBackup(arquivo(o.zip)));
+    const de2 = await db.obterImovelCompleto(o.id);
+    out.substituiu = de2.ambientes.length === o.ambientes.length && de2.imovel.endereco === o.imovel.endereco
+      && de2.fotos.length === o.fotos.length && de2.assinaturas.length === 1
+      && de2.imovel.atualizadoEm === o.imovel.atualizadoEm;
+    return out;
+  }, origem);
+  await contexto.close();
+
+  const nome = origem.nome;
+  ok(r2.erros.fotoByte === `${nome}: a foto ${origem.fotoTrocadaN} não confere com o código de verificação.`,
+    `restaurar: foto com byte trocado é recusada (${r2.erros.fotoByte})`);
+  ok(r2.erros.pngByte === `${nome}: a assinatura 1 não confere com o código de verificação.`,
+    `restaurar: PNG de assinatura trocado é recusado (${r2.erros.pngByte})`);
+  ok(r2.erros.fotoNaoAssinada === `${nome}: a foto ${origem.fotoTrocadaN} não é a mesma que foi assinada.`,
+    `restaurar: foto e hash trocados juntos são recusados pela assinatura (${r2.erros.fotoNaoAssinada})`);
+  ok(r2.erros.formato2 === `${nome}: este backup foi feito por uma versão mais nova do app. Atualize o app e tente de novo.`,
+    `restaurar: formato desconhecido é recusado (${r2.erros.formato2})`);
+  ok(r2.erros.danificado === `${nome}: Arquivo de backup danificado.`, `restaurar: zip danificado (${r2.erros.danificado})`);
+  ok(r2.nadaGravado, 'restaurar: arquivo recusado não grava nada');
+  ok(r2.lido, 'lerBackup devolve id e atualizadoEm do backup');
+  ok(r2.imovel, 'restaurar: imóvel igual ao original (inclusive atualizadoEm)');
+  ok(r2.miniaturaFachada, 'restaurar: miniatura da fachada refeita com os mesmos bytes');
+  ok(r2.ambientes, 'restaurar: ambientes iguais');
+  ok(r2.fotos, 'restaurar: fotos e miniaturas byte a byte, ids, horas e hash iguais');
+  ok(r2.assinatura, 'restaurar: assinatura igual, PNG byte a byte, codigoDaAssinatura confere');
+  ok(r2.trava === true, `restaurar: foto assinada continua sem poder ser apagada (${r2.trava})`);
+  ok(r2.semPendencia, 'restaurar conta como backup feito');
+  ok(r2.proximo, 'restaurar: numeração continua depois do imóvel restaurado');
+  ok(r2.substituiu, 'restaurar por cima: volta tudo como no backup');
+  ok(errosNovo.length === 0, 'restaurar: sem erros no celular novo' + (errosNovo.length ? `: ${errosNovo.join(' | ')}` : ''));
 }

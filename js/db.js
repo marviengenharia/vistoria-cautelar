@@ -122,6 +122,39 @@ export async function excluirImovel(id) {
   await tx.done;
 }
 
+/**
+ * Restaura um imóvel vindo de backup, já conferido (fotos e assinaturas com as imagens em Blob).
+ * Numa transação só: apaga o que houver dele neste aparelho e grava tudo exatamente como veio
+ * (ids, hashes, códigos e horas, inclusive `atualizadoEm`). Não passa pelas travas de foto
+ * assinada: é a mesma prova voltando. A numeração de imóveis novos continua depois dele.
+ */
+export async function restaurarImovel({ imovel, ambientes, fotos, assinaturas }) {
+  const db = await bancoPronto;
+  const id = imovel.id;
+  const fotoFachada = imovel.fachada && fotos.find((f) => f.id === imovel.fachada.fotoId);
+  const novo = {
+    ...imovel,
+    fachada: imovel.fachada ? { ...imovel.fachada, miniatura: fotoFachada?.miniatura ?? null } : null,
+  };
+  const numero = Number(/^IM-(\d+)$/.exec(id)?.[1]);
+
+  const tx = db.transaction(['imoveis', 'ambientes', 'fotos', 'assinaturas', 'config'], 'readwrite');
+  for (const nome of ['fotos', 'ambientes', 'assinaturas']) {
+    const indice = tx.objectStore(nome).index('imovelId');
+    for (let c = await indice.openCursor(id); c; c = await c.continue()) await c.delete();
+  }
+  await tx.objectStore('imoveis').put(novo);
+  for (const a of ambientes) await tx.objectStore('ambientes').put(a);
+  for (const f of fotos) await tx.objectStore('fotos').put(f);
+  for (const a of assinaturas) await tx.objectStore('assinaturas').put(a);
+  if (numero) {
+    const config = tx.objectStore('config');
+    const proximo = (await config.get('proximoNumero')) ?? 1;
+    if (proximo <= numero) await config.put(numero + 1, 'proximoNumero');
+  }
+  await tx.done;
+}
+
 // ===================== ambientes =====================
 
 export async function listarAmbientes(imovelId) {
