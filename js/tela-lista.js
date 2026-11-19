@@ -1,5 +1,5 @@
 // Tela inicial: fotos das fachadas em grade, filtro de lado e "perto da estaca".
-import { listarImoveis, criarImovel, obterImovel } from './db.js';
+import { listarImoveis, criarImovel, obterImovel, listarAssinaturas } from './db.js';
 import { STATUS, RAIO_ESTACAS, estacaNumero, rotuloDe } from './dominio.js';
 import { esc, mostrarMensagem, CASINHA_SVG, dataHora } from './util.js';
 import { imoveisSemBackup, montarBackup, registrarBackup, lerBackup, restaurarBackup } from './backup.js';
@@ -16,6 +16,23 @@ const LADOS_FILTRO = [
 
 const ARQUIVOS_POR_VEZ = 10; // alguns celulares não aceitam muitos arquivos num compartilhamento só
 const DIAS_PARA_ALERTA = 2;
+
+/** Pergunta antes de trocar o imóvel do celular pelo do backup (avisa se assinaturas vão sumir). */
+async function perguntaSubstituir(atual, lido) {
+  const quandoCelular = atual.atualizadoEm ?? atual.criadoEm;
+  const quandoBackup = lido.atualizadoEm ?? lido.dados.geradoEm;
+  const noCelular = await listarAssinaturas(atual.id);
+  const noBackup = new Set(lido.dados.assinaturas.map((a) => a.id));
+  const n = noCelular.length;
+  const atencao = noCelular.some((a) => !noBackup.has(a.id))
+    ? `Atenção: neste celular há ${n} ${n === 1 ? 'assinatura' : 'assinaturas'}; no backup, ${noBackup.size}. `
+      + 'As que não estão no backup serão apagadas.\n\n'
+    : '';
+  const maisAntigo = quandoBackup && quandoCelular && quandoBackup < quandoCelular
+    ? 'O backup é mais antigo que o que está no celular. ' : '';
+  return `${atencao}${atual.id} já existe neste celular (alterado em ${dataHora(quandoCelular)}). `
+    + `O backup é de ${dataHora(quandoBackup)}. ${maisAntigo}Substituir pelo backup?`;
+}
 
 function normalizar(texto) {
   return String(texto ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -97,7 +114,7 @@ export async function telaLista(raiz) {
     const estaca = im.estaca
       ? `<span class="tag-estaca">E${esc(String(im.estaca).replace(/^\s*E\s*/i, ''))}</span>` : '';
     return `
-      <a class="cartao-foto st-${im.status}" href="#/imovel/${encodeURIComponent(im.id)}"
+      <a class="cartao-foto st-${esc(im.status)}" href="#/imovel/${encodeURIComponent(im.id)}"
          aria-label="${esc(`${im.id}, ${rotuloDe(STATUS, im.status)}${im.endereco ? `, ${im.endereco}` : ''}`)}">
         ${imagem}${estaca}
         <span class="cartao-rodape">
@@ -301,8 +318,7 @@ export async function telaLista(raiz) {
       try {
         const lido = await lerBackup(arquivo);
         const atual = await obterImovel(lido.id);
-        if (atual && !confirm(`${lido.id} já existe neste celular (alterado em ${dataHora(atual.atualizadoEm ?? atual.criadoEm)}). `
-          + `O backup é de ${dataHora(lido.atualizadoEm ?? lido.dados.geradoEm)}. Substituir pelo backup?`)) {
+        if (atual && !confirm(await perguntaSubstituir(atual, lido))) {
           mantidos += 1;
           continue;
         }

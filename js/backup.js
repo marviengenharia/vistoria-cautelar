@@ -5,6 +5,7 @@ import {
 } from './db.js';
 import { criarZip, lerZip } from './zip.js';
 import { impressaoDigital } from './foto.js';
+import { STATUS } from './dominio.js';
 
 const FORMATO = 1;
 const PESSOAS = ['ocupante', 'testemunha', 'vistoriador'];
@@ -55,6 +56,19 @@ export async function montarBackup(imovelId) {
 }
 
 const NAO_E_DO_APP = 'Este arquivo não foi feito pelo app.';
+const ID_IMOVEL = /^IM-\d{3,}$/;
+const ID_REGISTRO = /^[\w-]{1,64}$/;
+
+/** O imovel.json tem a forma que o app grava? (ids, ligações entre registros e situação conhecida) */
+function formaValida({ imovel, ambientes, fotos, assinaturas }) {
+  const listas = [ambientes, fotos, assinaturas];
+  if (!ID_IMOVEL.test(imovel?.id ?? '') || !listas.every(Array.isArray)) return false;
+  if (!STATUS.some((s) => s.valor === imovel.status)) return false;
+  if (!listas.flat().every((r) => r?.imovelId === imovel.id && ID_REGISTRO.test(r.id ?? ''))) return false;
+  const idsAmbientes = new Set(ambientes.map((a) => a.id));
+  if (!fotos.every((f) => idsAmbientes.has(f.ambienteId))) return false;
+  return !imovel.fachada?.fotoId || fotos.some((f) => f.id === imovel.fachada.fotoId);
+}
 
 /**
  * Lê um arquivo de backup e confere tudo antes de qualquer gravação: cada foto com o hash dela,
@@ -79,13 +93,9 @@ export async function lerBackup(arquivo) {
   if (typeof json?.formato === 'number' && json.formato > FORMATO) {
     throw falha('este backup foi feito por uma versão mais nova do app. Atualize o app e tente de novo.');
   }
-  const { imovel, ambientes, fotos, assinaturas } = json ?? {};
-  const id = imovel?.id;
-  const listas = [ambientes, fotos, assinaturas];
-  if (json?.formato !== FORMATO || typeof id !== 'string' || !listas.every(Array.isArray)
-    || !listas.flat().every((r) => r?.imovelId === id && typeof r.id === 'string')) {
-    throw falha(NAO_E_DO_APP);
-  }
+  if (json?.formato !== FORMATO || !formaValida(json)) throw falha(NAO_E_DO_APP);
+  const { imovel, ambientes, fotos, assinaturas } = json;
+  const id = imovel.id;
 
   const fotosProntas = [];
   for (const [i, f] of fotos.entries()) {

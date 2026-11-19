@@ -476,7 +476,6 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
 
   // backups do IM-001 (com assinaturas) e do IM-002 (com fachada) guardados para restaurar no fim,
   // depois de eles serem excluídos
-  const pastaBackup = fs.mkdtempSync(path.join(os.tmpdir(), 'vistoria-restaurar-'));
   const zips = await page.evaluate(async () => {
     const { montarBackup } = await import('/js/backup.js');
     const { criarZip, lerZip } = await import('/js/zip.js');
@@ -498,13 +497,6 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
       nome2: outro.name, bom2: await base64(outro),
     };
   });
-  const zipBom = path.join(pastaBackup, zips.nome);
-  const zipAdulterado = path.join(pastaBackup, 'adulterado.zip');
-  const zipBom2 = path.join(pastaBackup, zips.nome2);
-  fs.writeFileSync(zipBom, Buffer.from(zips.bom, 'base64'));
-  fs.writeFileSync(zipBom2, Buffer.from(zips.bom2, 'base64'));
-  fs.writeFileSync(zipAdulterado, Buffer.from(zips.adulterado, 'base64'));
-
   // ---------- sem internet ----------
   await pararServidor();
   await page.goto(base + '#/');
@@ -541,48 +533,82 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   ok(dialogos[2]?.startsWith('Excluir IM-002?'), `imóvel sem assinatura mantém a confirmação de sempre (${dialogos[2]})`);
 
   // ---------- restaurar backup (IM-001 e IM-002 foram excluídos acima) ----------
-  await voltarParaLista();
-  ok(await page.$eval('#restaurar', (l) => l.textContent.trim() === 'Restaurar backup'
-    && l.closest('.pagina-lista') && !l.closest('.aviso-backup')), 'tela inicial: link discreto "Restaurar backup"');
-  ok(await page.$eval('#entrada-restaurar', (e) => e.multiple && e.accept === '.zip,application/zip'),
-    'restaurar: escolhe um ou vários .zip');
-  // depois de restaurar a lista é desenhada de novo (o link volta ao texto normal)
-  const listaRedesenhada = () => page.waitForFunction(
-    () => document.querySelector('#restaurar span')?.textContent === 'Restaurar backup', { timeout: 10000 });
-  const antes = dialogos.length;
-  await limparMensagem();
-  await (await page.$('#entrada-restaurar')).uploadFile(zipBom, zipAdulterado, zipBom2);
-  await mensagemTem('2 imóveis restaurados, 1 com problema');
-  await listaRedesenhada();
-  ok(true, 'restaurar: resumo "2 imóveis restaurados, 1 com problema"');
-  ok(dialogos.length === antes + 1 && dialogos[antes] === 'adulterado.zip: a foto 1 não confere com o código de verificação.',
-    `restaurar: arquivo adulterado avisa o motivo e segue (${dialogos.slice(antes).join(' | ')})`);
-  await page.click('.segmento[data-lado="ambos"]');
-  ok(await page.$('a[href="#/imovel/IM-001"]') && await page.$('a[href="#/imovel/IM-002"] img'),
-    'restaurar: IM-001 e IM-002 voltam à lista, IM-002 com a miniatura da fachada');
-  ok((await page.evaluate(async () => (await import('/js/db.js')).listarAssinaturas('IM-001'))).length === 2,
-    'restaurar: as 2 assinaturas do IM-001 voltam');
-  ok(!(await page.evaluate(async () => (await import('/js/backup.js')).imoveisSemBackup())).some((p) => p.id === 'IM-001'),
-    'restaurar: IM-001 não aparece como sem backup');
+  // os arquivos vão para uma pasta temporária, apagada no fim mesmo se o teste falhar
+  const pastaBackup = fs.mkdtempSync(path.join(os.tmpdir(), 'vistoria-restaurar-'));
+  try {
+    const zipBom = path.join(pastaBackup, zips.nome);
+    const zipAdulterado = path.join(pastaBackup, 'adulterado.zip');
+    const zipBom2 = path.join(pastaBackup, zips.nome2);
+    fs.writeFileSync(zipBom, Buffer.from(zips.bom, 'base64'));
+    fs.writeFileSync(zipBom2, Buffer.from(zips.bom2, 'base64'));
+    fs.writeFileSync(zipAdulterado, Buffer.from(zips.adulterado, 'base64'));
 
-  // de novo: o imóvel já existe → pergunta antes de substituir
-  const esperado = await page.evaluate(async (bk) => {
-    const { dataHora } = await import('/js/util.js');
-    const atual = await (await import('/js/db.js')).obterImovel('IM-001');
-    return `IM-001 já existe neste celular (alterado em ${dataHora(atual.atualizadoEm)}). O backup é de ${dataHora(bk)}. Substituir pelo backup?`;
-  }, zips.atualizadoEm);
-  const antes2 = dialogos.length;
-  await limparMensagem();
-  await (await page.$('#entrada-restaurar')).uploadFile(zipBom);
-  await mensagemTem('1 imóvel restaurado');
-  await listaRedesenhada();
-  ok(dialogos[antes2] === esperado && /\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}/.test(dialogos[antes2]),
-    `restaurar: imóvel que já existe pede confirmação (${dialogos[antes2]})`);
-  // recusou a troca: fica como estava
-  await page.evaluate(() => { window.confirm = () => false; });
-  await limparMensagem();
-  await (await page.$('#entrada-restaurar')).uploadFile(zipBom);
-  await mensagemTem('0 imóveis restaurados, 1 mantido como estava');
-  ok(true, 'restaurar: "Cancelar" mantém o imóvel como estava');
-  fs.rmSync(pastaBackup, { recursive: true, force: true });
+    await voltarParaLista();
+    ok(await page.$eval('#restaurar', (l) => l.textContent.trim() === 'Restaurar backup'
+      && l.closest('.pagina-lista') && !l.closest('.aviso-backup')), 'tela inicial: link discreto "Restaurar backup"');
+    ok(await page.$eval('#entrada-restaurar', (e) => e.multiple && e.accept === '.zip,application/zip'),
+      'restaurar: escolhe um ou vários .zip');
+    // depois de restaurar a lista é desenhada de novo (o link volta ao texto normal)
+    const listaRedesenhada = () => page.waitForFunction(
+      () => document.querySelector('#restaurar span')?.textContent === 'Restaurar backup', { timeout: 10000 });
+    const antes = dialogos.length;
+    await limparMensagem();
+    await (await page.$('#entrada-restaurar')).uploadFile(zipBom, zipAdulterado, zipBom2);
+    await mensagemTem('2 imóveis restaurados, 1 com problema');
+    await listaRedesenhada();
+    ok(true, 'restaurar: resumo "2 imóveis restaurados, 1 com problema"');
+    ok(dialogos.length === antes + 1 && dialogos[antes] === 'adulterado.zip: a foto 1 não confere com o código de verificação.',
+      `restaurar: arquivo adulterado avisa o motivo e segue (${dialogos.slice(antes).join(' | ')})`);
+    await page.click('.segmento[data-lado="ambos"]');
+    ok(await page.$('a[href="#/imovel/IM-001"]') && await page.$('a[href="#/imovel/IM-002"] img'),
+      'restaurar: IM-001 e IM-002 voltam à lista, IM-002 com a miniatura da fachada');
+    ok((await page.evaluate(async () => (await import('/js/db.js')).listarAssinaturas('IM-001'))).length === 2,
+      'restaurar: as 2 assinaturas do IM-001 voltam');
+    ok(!(await page.evaluate(async () => (await import('/js/backup.js')).imoveisSemBackup())).some((p) => p.id === 'IM-001'),
+      'restaurar: IM-001 não aparece como sem backup');
+
+    // de novo: o imóvel já existe → pergunta antes de substituir
+    const esperado = await page.evaluate(async (bk) => {
+      const { dataHora } = await import('/js/util.js');
+      const atual = await (await import('/js/db.js')).obterImovel('IM-001');
+      return `IM-001 já existe neste celular (alterado em ${dataHora(atual.atualizadoEm)}). O backup é de ${dataHora(bk)}. Substituir pelo backup?`;
+    }, zips.atualizadoEm);
+    const antes2 = dialogos.length;
+    await limparMensagem();
+    await (await page.$('#entrada-restaurar')).uploadFile(zipBom);
+    await mensagemTem('1 imóvel restaurado');
+    await listaRedesenhada();
+    ok(dialogos[antes2] === esperado && /\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}/.test(dialogos[antes2]),
+      `restaurar: imóvel que já existe pede confirmação, sem aviso de perda nem de backup antigo (${dialogos[antes2]})`);
+
+    // no celular há uma assinatura que não está no backup, e o celular mudou depois do backup
+    const esperado2 = await page.evaluate(async (bk) => {
+      const db = await import('/js/db.js');
+      const { dataHora } = await import('/js/util.js');
+      const idsFotos = (await db.listarFotosDoImovel('IM-001')).map((f) => f.id);
+      await new Promise((r) => setTimeout(r, 5)); // garante hora de mudança depois da do backup
+      await db.gravarAssinatura('IM-001', {
+        tipo: 'ciencia', texto: 'termo de teste', idsFotosConferidas: idsFotos,
+        ocupante: { nome: 'Pessoa Teste', assinatura: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }) },
+        vistoriador: { nome: 'Vistoriador Teste', assinatura: new Blob([new Uint8Array([4, 5, 6])], { type: 'image/png' }) },
+      });
+      const atual = await db.obterImovel('IM-001');
+      // a resposta "Cancelar" e o texto da pergunta ficam guardados
+      window.__perguntas = [];
+      window.confirm = (m) => { window.__perguntas.push(m); return false; };
+      return 'Atenção: neste celular há 3 assinaturas; no backup, 2. As que não estão no backup serão apagadas.\n\n'
+        + `IM-001 já existe neste celular (alterado em ${dataHora(atual.atualizadoEm)}). O backup é de ${dataHora(bk)}. `
+        + 'O backup é mais antigo que o que está no celular. Substituir pelo backup?';
+    }, zips.atualizadoEm);
+    await limparMensagem();
+    await (await page.$('#entrada-restaurar')).uploadFile(zipBom);
+    await mensagemTem('0 imóveis restaurados, 1 mantido como estava');
+    await listaRedesenhada();
+    const pergunta = await page.evaluate(() => window.__perguntas[0]);
+    ok(pergunta === esperado2, `restaurar: avisa que assinaturas serão apagadas e que o backup é mais antigo (${pergunta})`);
+    ok((await page.evaluate(async () => (await import('/js/db.js')).listarAssinaturas('IM-001'))).length === 3,
+      'restaurar: "Cancelar" mantém o imóvel como estava (3 assinaturas)');
+  } finally {
+    fs.rmSync(pastaBackup, { recursive: true, force: true });
+  }
 }

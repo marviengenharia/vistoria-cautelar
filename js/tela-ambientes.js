@@ -102,7 +102,7 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
       ? '<span class="marca-cadeado" aria-hidden="true">🔒</span>'
       : (temAssinatura ? '<span class="marca-depois">Depois da assinatura</span>' : '');
     const estado = assinada ? ' (assinada)' : (temAssinatura ? ' (depois da assinatura)' : '');
-    return `<button type="button" class="miniatura-foto" data-foto="${foto.id}" aria-label="Foto ${indice + 1}${estado}: abrir para classificar">
+    return `<button type="button" class="miniatura-foto" data-foto="${esc(foto.id)}" aria-label="Foto ${indice + 1}${estado}: abrir para classificar">
       <img src="${url}" alt="">${selo}${capa}${marca}</button>`;
   }
 
@@ -115,7 +115,7 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
     listaEl.innerHTML = ambientes.map((a) => {
       const fotos = fotosPorAmbiente.get(a.id) ?? [];
       return `
-        <details class="bloco" data-ambiente="${a.id}" ${abertos.has(a.id) ? 'open' : ''}>
+        <details class="bloco" data-ambiente="${esc(a.id)}" ${abertos.has(a.id) ? 'open' : ''}>
           <summary>
             <span class="bloco-titulo">${esc(a.nome)}</span>
             <span class="bloco-resumo ${fotos.length ? '' : 'a-preencher'}">${resumoAmbiente(fotos)}</span>

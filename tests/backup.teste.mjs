@@ -259,6 +259,19 @@ export default async function ({ page, browser, base, ok }) {
       }),
       pngByte: await adulterado((m, j) => { m.get(j.assinaturas[0].testemunha.assinatura)[50] ^= 0xff; }),
       formato2: await adulterado((m, j) => { j.formato = 2; }),
+      // JSON fora da forma do app (o que chegaria ao HTML sem conferir)
+      forma: {
+        status: await adulterado((m, j) => { j.imovel.status = '"><img src=x onerror=alert(1)>'; }),
+        ambienteDesconhecido: await adulterado((m, j) => { j.fotos[0].ambienteId = 'AMB-que-nao-existe'; }),
+        idComAspas: await adulterado((m, j) => { j.ambientes[0].id = 'AMB-1" onclick="x'; }),
+        idComEspaco: await adulterado((m, j) => { j.assinaturas[0].id = 'ASS 1'; }),
+        idImovel: await adulterado((m, j) => {
+          j.imovel.id = 'IM-1<b>';
+          for (const r of [...j.ambientes, ...j.fotos, ...j.assinaturas]) r.imovelId = j.imovel.id;
+        }),
+        outroImovel: await adulterado((m, j) => { j.fotos[0].imovelId = 'IM-999'; }),
+        fachadaDesconhecida: await adulterado((m, j) => { j.imovel.fachada.fotoId = 'FOTO-que-nao-existe'; }),
+      },
       danificado: await base64(new Blob([cru])),
       imovel: { ...completo.imovel, fachada: { ...completo.imovel.fachada, miniatura: null } },
       fachadaMini64: await base64(completo.imovel.fachada.miniatura),
@@ -303,6 +316,8 @@ export default async function ({ page, browser, base, ok }) {
       formato2: await erroDe(o.formato2),
       danificado: await erroDe(o.danificado),
     };
+    out.forma = {};
+    for (const [k, s] of Object.entries(o.forma)) out.forma[k] = await erroDe(s);
     out.nadaGravado = (await db.listarImoveis()).length === 0;
 
     const lido = await lerBackup(arquivo(o.zip));
@@ -359,7 +374,10 @@ export default async function ({ page, browser, base, ok }) {
   ok(r2.erros.formato2 === `${nome}: este backup foi feito por uma versão mais nova do app. Atualize o app e tente de novo.`,
     `restaurar: formato desconhecido é recusado (${r2.erros.formato2})`);
   ok(r2.erros.danificado === `${nome}: Arquivo de backup danificado.`, `restaurar: zip danificado (${r2.erros.danificado})`);
-  ok(r2.nadaGravado, 'restaurar: arquivo recusado não grava nada');
+  ok(Object.keys(r2.forma).length === 7
+    && Object.values(r2.forma).every((m) => m === `${nome}: Este arquivo não foi feito pelo app.`),
+  `restaurar: status com HTML, foto em ambiente desconhecido, ids com aspas/espaço, id do imóvel fora do padrão, registro de outro imóvel e fachada desconhecida são recusados (${JSON.stringify(r2.forma)})`);
+  ok(r2.nadaGravado,'restaurar: arquivo recusado não grava nada');
   ok(r2.lido, 'lerBackup devolve id e atualizadoEm do backup');
   ok(r2.imovel, 'restaurar: imóvel igual ao original (inclusive atualizadoEm)');
   ok(r2.miniaturaFachada, 'restaurar: miniatura da fachada refeita com os mesmos bytes');

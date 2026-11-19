@@ -64,7 +64,7 @@ export async function telaAssinaturas(conteudo, imovel, { mostrarEstado, aoMudar
       ? grupos.map((g) => `
           <p class="grupo-patologia">${esc(g.nome)}</p>
           <div class="grade-miniaturas">${g.fotos.map((f) => `
-            <button type="button" class="miniatura-foto" data-ver-foto="${f.id}" aria-label="Ver a foto inteira">
+            <button type="button" class="miniatura-foto" data-ver-foto="${esc(f.id)}" aria-label="Ver a foto inteira">
               <img src="${urlDe(f.miniatura)}" alt=""></button>`).join('')}
           </div>`).join('')
         + '<p class="ajuda">Toque numa foto para ver inteira. O morador confere só se as fotos mostram o imóvel como está hoje.</p>'
