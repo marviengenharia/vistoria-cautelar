@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Prévia do laudo</title>
+<style>
+@font-face { font-family: Barlow; font-weight: 400; src: url(file:///C:/Obras/vistoria-cautelar/vendor/fontes/barlow-latin-400-normal.woff2); }
+@font-face { font-family: Barlow; font-weight: 600; src: url(file:///C:/Obras/vistoria-cautelar/vendor/fontes/barlow-latin-600-normal.woff2); }
+@font-face { font-family: Barlow; font-weight: 700; src: url(file:///C:/Obras/vistoria-cautelar/vendor/fontes/barlow-latin-700-normal.woff2); }
+@font-face { font-family: BarlowC; font-weight: 700; src: url(file:///C:/Obras/vistoria-cautelar/vendor/fontes/barlow-condensed-latin-700-normal.woff2); }
+@page { size: A4; margin: 16mm 16mm 18mm; }
+:root { --azul: #000c38; --verde: #0a8a3a; --vermelho: #d81e24; --cinza: #5b6170; --linha: #c9ccd4; --fundo: #f1f2f5; }
+* { box-sizing: border-box; }
+body { font-family: Barlow, sans-serif; font-size: 10.5pt; line-height: 1.4; color: #111; margin: 0; }
+.pagina { page-break-after: always; position: relative; }
+.pagina:last-child { page-break-after: auto; }
+.topo { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid var(--azul); padding-bottom: 6px; margin-bottom: 14px; }
+.topo img { height: 30px; }
+.topo span { font-size: 9pt; color: var(--cinza); text-align: right; }
+h1, h2 { color: var(--azul); }
+h2 { font-family: BarlowC, Barlow, sans-serif; font-size: 15pt; margin: 18px 0 8px; display: flex; gap: 8px; align-items: baseline; }
+h2 b { color: var(--verde); }
+p { margin: 0 0 7px; }
+.marca { background: #fff3c4; border: 1px dashed #b38b00; padding: 0 4px; font-size: 9pt; }
+table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+td, th { border: 1px solid var(--linha); padding: 4px 6px; text-align: left; vertical-align: top; }
+th { background: var(--fundo); color: var(--azul); font-weight: 600; }
+.ficha td:first-child { width: 34%; background: var(--fundo); color: var(--cinza); }
+/* capa */
+.capa { height: 258mm; display: flex; flex-direction: column; }
+.capa .logo { width: 62mm; }
+.faixa { display: flex; gap: 6px; margin: 10px 0 18px; }
+.faixa i { height: 3px; width: 26mm; background: var(--verde); } .faixa i + i { background: var(--vermelho); }
+.capa h1 { font-family: BarlowC, Barlow, sans-serif; font-size: 30pt; line-height: 1; margin: 6mm 0 2mm; }
+.capa .num { font-family: BarlowC, Barlow, sans-serif; font-size: 44pt; color: var(--azul); line-height: 1; }
+.capa .obra { font-size: 11.5pt; font-weight: 600; margin: 4mm 0 5mm; max-width: 150mm; }
+.capa .fachada { width: 100%; height: 92mm; object-fit: contain; background: var(--fundo); border: 1px solid var(--linha); }
+.capa .dados { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm 8mm; margin-top: 6mm; font-size: 10pt; }
+.capa .dados b { display: block; color: var(--cinza); font-weight: 400; font-size: 8.5pt; }
+.capa .rodape-capa { margin-top: auto; border-top: 1.5px solid var(--azul); padding-top: 3mm; font-size: 8.5pt; color: var(--cinza); }
+/* fotos */
+.grade { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm 6mm; }
+figure { margin: 0; break-inside: avoid; }
+figure img { width: 100%; height: 62mm; object-fit: contain; background: var(--fundo); border: 1px solid var(--linha); display: block; }
+figcaption { font-size: 8.8pt; margin-top: 2mm; line-height: 1.3; }
+figcaption strong { color: var(--azul); }
+.pat { color: var(--vermelho); font-weight: 600; }
+.ok { color: var(--verde); font-weight: 600; }
+.cod { font-family: Consolas, monospace; font-size: 7.6pt; color: var(--cinza); }
+.ambiente { font-family: BarlowC, Barlow, sans-serif; color: var(--azul); font-size: 12pt; margin: 4mm 0 2mm; border-left: 4px solid var(--verde); padding-left: 6px; }
+/* termo */
+.termo { border: 1.5px solid var(--azul); padding: 5mm; margin-top: 4mm; font-size: 11pt; }
+.assin { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; margin-top: 8mm; }
+.assin div { padding-top: 0; font-size: 9pt; text-align: center; }
+.assin svg { display: block; margin: 0 auto; height: 22mm; border-bottom: 1px solid #222; width: 100%; }
+.assin div strong { display:block; margin-top: 2mm; }
+.codigos td { font-family: Consolas, monospace; font-size: 7.4pt; }
+</style>
+</head>
+<body>
+
+<!-- ===================== 1. CAPA ===================== -->
+<section class="pagina capa">
+  <img class="logo" src="logo-cbs.png" alt="Consórcio Bernardo Sayão">
+  <div style="height:1.5px;background:var(--azul);margin:8mm 0 2mm"></div>
+  <h1>Laudo de Vistoria Cautelar<br>de Vizinhança</h1>
+  <div class="num">IM-012</div>
+  <p class="obra">Obra: Macrodrenagem e Duplicação da Avenida Bernardo Sayão – Fase III e execução do sistema de comportas da Sub-bacia 2 — Belém/PA</p>
+  <img class="fachada" src="foto1.jpg" alt="">
+  <div class="dados">
+    <div><b>Endereço do imóvel</b>Passagem Exemplo, 115 — Belém/PA</div>
+    <div><b>Localização na obra</b>Estaca 30+10, lado esquerdo</div>
+    <div><b>Data da vistoria</b>18/11/2026, das 14:02 às 14:41</div>
+    <div><b>Situação</b>Vistoriado — termo assinado pelo morador</div>
+    <div><b>Responsável técnico</b><span class="marca">[nome] · CREA [nº] · ART [nº]</span></div>
+    <div><b>Contratante da obra</b>Município de Belém — PROMABEN (CE nº 07/2026)</div>
+  </div>
+  <div class="rodape-capa">
+    <strong>Consórcio Bernardo Sayão</strong> · CNPJ 70.098.809/0001-83<br>
+    Av. Júlio César, 65 — Souza — Belém/PA — CEP 66.613-010 · (91) 3131-9800
+  </div>
+</section>
+
+<!-- ===================== 2–4 ===================== -->
+<section class="pagina">
+  <div class="topo"><img src="logo-cbs.png" alt=""><span>Laudo de Vistoria Cautelar — IM-012<br>Passagem Exemplo, 115</span></div>
+
+  <h2><b>1</b> Objetivo</h2>
+  <p>Registrar o estado de conservação do imóvel <strong>antes do início</strong> das obras de macrodrenagem e duplicação da Av. Bernardo Sayão – Fase III, para servir de referência em eventuais reclamações de danos atribuídos à obra (vibração, escavação, rebaixamento do lençol). <span class="marca">texto padrão — a revisar pela Raquel/jurídico</span></p>
+
+  <h2><b>2</b> Método</h2>
+  <p>Vistoria visual, sem ensaios destrutivos, seguindo a lógica da ABNT NBR 13752. Cada ambiente foi fotografado; cada foto recebeu, no momento em que entrou no aplicativo, um carimbo com o número do imóvel, a data e hora e as coordenadas GPS, e um código de verificação (SHA-256) que permite provar que a imagem não foi alterada depois. O ocupante acompanhou a vistoria e conferiu as fotos antes de assinar o termo (item 7).</p>
+
+  <h2><b>3</b> Identificação e localização</h2>
+  <table class="ficha">
+    <tr><td>Endereço</td><td>Passagem Exemplo, 115 — Belém/PA</td></tr>
+    <tr><td>Ponto de referência</td><td>Em frente à praça</td></tr>
+    <tr><td>Estaca / lado</td><td>30+10 / lado esquerdo</td></tr>
+    <tr><td>Distância à borda da obra</td><td>8,5 m</td></tr>
+    <tr><td>Coordenadas GPS</td><td>-1,443600, -48,473200 (precisão ±6 m)</td></tr>
+    <tr><td>Ocupante</td><td>Maria Exemplo — proprietária</td></tr>
+  </table>
+
+  <h2><b>4</b> Características e estado de conservação</h2>
+  <table class="ficha">
+    <tr><td>Uso</td><td>Residencial</td></tr>
+    <tr><td>Pavimentos</td><td>2</td></tr>
+    <tr><td>Estrutura</td><td>Concreto armado</td></tr>
+    <tr><td>Cobertura</td><td>Telha cerâmica</td></tr>
+    <tr><td>Fundação aparente</td><td>Não visível</td></tr>
+    <tr><td>Idade aparente</td><td>10 a 20 anos</td></tr>
+    <tr><td>Estado de conservação</td><td><strong>Regular</strong></td></tr>
+    <tr><td>Observações</td><td>Muro dos fundos com reforma recente.</td></tr>
+  </table>
+</section>
+
+<!-- ===================== 5. RELATÓRIO FOTOGRÁFICO ===================== -->
+<section class="pagina">
+  <div class="topo"><img src="logo-cbs.png" alt=""><span>Laudo de Vistoria Cautelar — IM-012<br>Passagem Exemplo, 115</span></div>
+  <h2><b>5</b> Relatório fotográfico</h2>
+
+  <div class="ambiente">Fachada</div>
+  <div class="grade">
+    <figure><img src="foto1.jpg" alt=""><figcaption><strong>Foto 1</strong> — Fachada<br><span class="ok">Sem patologia aparente</span><br>Tirada em 18/11/2026 14:05:32 · <span class="cod">a3f9 2c71 0be4 d816</span></figcaption></figure>
+    <figure><img src="foto5.jpg" alt=""><figcaption><strong>Foto 2</strong> — Fachada, calçada<br><span class="pat">Fissura</span> · abertura 0,3 mm<br>Fissura horizontal no pé do muro, junto à calçada.<br>Tirada em 18/11/2026 14:18:26 · <span class="cod">7d0e 91aa 4c3b 22f0</span></figcaption></figure>
+  </div>
+
+  <div class="ambiente">Sala</div>
+  <div class="grade">
+    <figure><img src="foto2.jpg" alt=""><figcaption><strong>Foto 3</strong> — Sala, parede<br><span class="pat">Trinca · Umidade/infiltração</span> · abertura 1,2 mm<br>Trinca inclinada acima da porta; mancha de umidade no rodapé.<br>Tirada em 18/11/2026 14:09:10 · <span class="cod">c41b 0f7e 93d2 a55e</span></figcaption></figure>
+    <figure><img src="foto4.jpg" alt=""><figcaption><strong>Foto 4</strong> — Sala, piso<br><span class="ok">Sem patologia aparente</span><br>Tirada em 18/11/2026 14:15:03 · <span class="cod">08bd e2c4 51f9 6a13</span></figcaption></figure>
+  </div>
+
+</section>
+<section class="pagina">
+  <div class="topo"><img src="logo-cbs.png" alt=""><span>Laudo de Vistoria Cautelar — IM-012<br>Passagem Exemplo, 115</span></div>
+  <div class="ambiente">Quarto 1</div>
+  <div class="grade">
+    <figure><img src="foto3.jpg" alt=""><figcaption><strong>Foto 5</strong> — Quarto 1, teto<br><span class="pat">Desplacamento de revestimento</span><br>Reboco solto no canto do teto.<br>Tirada em 18/11/2026 14:11:47 · <span class="cod">e7a0 3d58 c912 47bb</span></figcaption></figure>
+    <figure><img src="foto6.jpg" alt=""><figcaption><strong>Foto 6</strong> — Quarto 1, parede<br><span class="ok">Sem patologia aparente</span><br>Tirada em 18/11/2026 14:21:55 · <span class="cod">5f12 b8e3 0a7c d4e9</span></figcaption></figure>
+  </div>
+</section>
+
+<!-- ===================== 6–7 ===================== -->
+<section class="pagina">
+  <div class="topo"><img src="logo-cbs.png" alt=""><span>Laudo de Vistoria Cautelar — IM-012<br>Passagem Exemplo, 115</span></div>
+
+  <h2><b>6</b> Quadro-resumo das patologias</h2>
+  <table>
+    <tr><th>Foto</th><th>Ambiente</th><th>Patologia</th><th>Local</th><th>Abertura</th></tr>
+    <tr><td>2</td><td>Fachada</td><td>Fissura</td><td>Calçada</td><td>0,3 mm</td></tr>
+    <tr><td>3</td><td>Sala</td><td>Trinca</td><td>Parede</td><td>1,2 mm</td></tr>
+    <tr><td>3</td><td>Sala</td><td>Umidade/infiltração</td><td>Parede</td><td>—</td></tr>
+    <tr><td>5</td><td>Quarto 1</td><td>Desplacamento de revestimento</td><td>Teto</td><td>—</td></tr>
+  </table>
+  <p style="margin-top:3mm">6 fotos registradas: 4 patologias em 3 fotos; 3 fotos sem patologia aparente.</p>
+
+  <h2><b>7</b> Conclusão</h2>
+  <p>Na data desta vistoria o imóvel apresentava estado de conservação <strong>regular</strong>, com as patologias descritas no quadro acima, todas <strong>anteriores ao início das obras</strong>. Este laudo registra a situação existente e não avalia causas. <span class="marca">texto padrão — a revisar pela Raquel/jurídico</span></p>
+
+  <h2><b>8</b> Termo de ciência</h2>
+  <div class="termo">
+    Declaro que acompanhei a vistoria cautelar do meu imóvel (IM-012) em 18/11/2026 e que as 6 fotos registradas mostram o estado do imóvel nesta data.
+  </div>
+  <div class="assin">
+    <div>
+      <svg viewBox="0 0 220 70"><path d="M8 50 C30 10, 45 70, 62 32 S95 15, 104 48 S140 60, 150 28 C158 12, 170 52, 210 30" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <strong>Maria Exemplo</strong>Ocupante · Doc. 0000000 (exemplo)
+    </div>
+    <div>
+      <svg viewBox="0 0 220 70"><path d="M12 44 C25 18, 40 22, 48 46 S70 58, 86 26 C96 8, 112 60, 132 38 S170 20, 206 44" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <strong>João Vistoriador</strong>Vistoriador
+    </div>
+  </div>
+  <p style="margin-top:6mm;font-size:9pt">Assinado em 18/11/2026 às 14:41:12 · início da vistoria 14:02:40.<br>
+  Código de verificação da assinatura: <span class="cod">9b4e c0a1 77d2 3f86 e015 b2c9 48a7 d630 1e5f 0c92 a7b3 64d8 f21e 9c07 5ab4 e3d1</span></p>
+
+  <h3 style="color:var(--azul);font-size:10.5pt;margin:5mm 0 2mm">Fotos conferidas pelo ocupante (códigos completos)</h3>
+  <table class="codigos">
+    <tr><th>Foto</th><th>Código de verificação (SHA-256)</th></tr>
+    <tr><td>1</td><td>a3f92c710be4d816e0c7a95b3f4d12e8c06b7a9f13de5c84b20a6e9f7c31d5b2</td></tr>
+    <tr><td>2</td><td>7d0e91aa4c3b22f05e18b7d9a0c3f6e214b8d75c9e0a3f61d27c4b8e95a0f1c3</td></tr>
+    <tr><td>3</td><td>c41b0f7e93d2a55e2b7c80d1f94e6a3c5d0b8e71f2a49c36e8d05b1a7f3c9e24</td></tr>
+    <tr><td>…</td><td>…</td></tr>
+  </table>
+</section>
+
+</body>
+</html>
