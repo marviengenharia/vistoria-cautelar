@@ -25,8 +25,8 @@ export const TEXTOS = {
   metodo(tipo) {
     const base = 'Vistoria visual, sem ensaios destrutivos, seguindo a lógica da ABNT NBR 13752. Cada '
       + 'ambiente foi fotografado; cada foto recebeu, no momento em que entrou no aplicativo, um carimbo '
-      + 'com o número do imóvel, a data e hora e as coordenadas GPS, e um código de verificação (SHA-256) '
-      + 'que permite provar que a imagem não foi alterada depois.';
+      + 'com o número do imóvel, a data e hora e as coordenadas GPS do imóvel, quando capturadas, e um '
+      + 'código de verificação (SHA-256) que permite provar que a imagem não foi alterada depois.';
     if (tipo === 'ciencia') return `${base} O ocupante acompanhou a vistoria e conferiu as fotos antes de assinar o termo (item 8).`;
     if (tipo === 'recusa') return `${base} O ocupante recusou a vistoria; a recusa foi registrada no termo do item 8, com testemunha.`;
     return `${base} O termo do item 8 ainda não foi assinado.`;

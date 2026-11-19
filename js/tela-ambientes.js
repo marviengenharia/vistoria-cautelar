@@ -294,7 +294,7 @@ export async function telaAmbientes(conteudo, imovel, { mostrarEstado, aoMudarIm
         </fieldset>
         <label class="campo" data-abertura>
           <span class="rotulo">Abertura medida (mm)</span>
-          <input type="number" name="abertura" value="${foto.abertura ?? ''}" min="0" step="0.05" inputmode="decimal">
+          <input type="number" name="abertura" value="${esc(foto.abertura)}" min="0" step="0.05" inputmode="decimal">
           <span class="ajuda">Só se mediu com o fissurômetro.</span>
         </label>
         <label class="campo">

@@ -36,8 +36,18 @@ export default async function ({ page, browser, base, ok }) {
     HTMLAnchorElement.prototype.click = function () { cliques++; out.download = this.download; };
     out.compart = await compartilharArquivos(
       [new File(['a'], 'a.txt'), new File(['b'], 'b.txt')], 'Teste');
-    HTMLAnchorElement.prototype.click = original;
     out.cliques = cliques;
+    // a folha existe mas falha (ex.: Chrome do Android com .zip): baixa e diz 'baixado', nunca 'compartilhado'
+    navigator.canShare = () => true;
+    navigator.share = () => Promise.reject(new DOMException('não permitido', 'NotAllowedError'));
+    cliques = 0;
+    const downloadSemSuporte = out.download;
+    out.compartFalhou = await compartilharArquivos([new File(['c'], 'c.zip')], 'Teste');
+    out.cliquesFalhou = cliques;
+    out.download = downloadSemSuporte;
+    delete navigator.canShare;
+    delete navigator.share;
+    HTMLAnchorElement.prototype.click = original;
     return out;
   });
   ok(r.tipo === 'application/zip', 'zip: tipo application/zip');
@@ -48,6 +58,7 @@ export default async function ({ page, browser, base, ok }) {
   ok(r.erro === 'Arquivo de backup danificado.', 'zip: byte trocado → danificado');
   ok(r.erroLixo === 'Arquivo de backup danificado.', 'zip: arquivo que não é zip → danificado');
   ok(r.compart === 'baixado' && r.cliques === 2 && r.download === 'b.txt', 'compartilhar: sem suporte baixa cada arquivo');
+  ok(r.compartFalhou === 'baixado' && r.cliquesFalhou === 1, `compartilhar: erro da folha (não cancelamento) baixa e devolve "baixado" (${r.compartFalhou})`);
 
   // ---------- backup de um imóvel ----------
   const b = await page.evaluate(async () => {
@@ -195,15 +206,26 @@ export default async function ({ page, browser, base, ok }) {
   ok(b.soOOutro, 'mudança num imóvel não afeta o backup de outro');
 
   // ---------- restaurar ----------
-  // No celular de origem: monta o backup e versões adulteradas (dados de teste, não são fotos reais).
+  // No celular de origem: monta o backup e versões adulteradas (imagens de teste feitas no canvas).
   const origem = await page.evaluate(async () => {
     const db = await import('/js/db.js');
     const { montarBackup } = await import('/js/backup.js');
     const { criarZip, lerZip } = await import('/js/zip.js');
     const { impressaoDigital } = await import('/js/foto.js');
-    const jpg = (n) => new Blob([new Uint8Array(1200 + n).map((_, i) => (i * 13 + n) & 255)], { type: 'image/jpeg' });
+    // JPEG de verdade (a restauração refaz a miniatura a partir da foto)
+    const jpg = (n) => new Promise((res) => {
+      const c = document.createElement('canvas');
+      c.width = 320;
+      c.height = 200;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = `hsl(${(n * 47) % 360}, 70%, 50%)`;
+      ctx.fillRect(0, 0, 320, 200);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(40 + n, 30, 80, 120);
+      c.toBlob(res, 'image/jpeg', 0.8);
+    });
     const png = (n) => new Blob([new Uint8Array(600 + n).map((_, i) => (i * 7 + n) & 255)], { type: 'image/png' });
-    const processada = async (n) => { const foto = jpg(n); return { foto, miniatura: jpg(n + 50), hash: await impressaoDigital(foto) }; };
+    const processada = async (n) => { const foto = await jpg(n); return { foto, miniatura: await jpg(n + 50), hash: await impressaoDigital(foto) }; };
     const base64 = async (blob) => {
       const b = new Uint8Array(await blob.arrayBuffer());
       let s = '';
@@ -258,6 +280,11 @@ export default async function ({ page, browser, base, ok }) {
         j.fotos[trocada].hash = await impressaoDigital(new Blob([b]));
       }),
       pngByte: await adulterado((m, j) => { m.get(j.assinaturas[0].testemunha.assinatura)[50] ^= 0xff; }),
+      // miniatura trocada por outra imagem (a miniatura não tem código de verificação)
+      miniaturaTrocada: await adulterado(async (m, j) => {
+        m.set(`miniaturas/${j.fotos[0].id}.jpg`, new Uint8Array(await (await jpg(99)).arrayBuffer()));
+      }),
+      idFotoMiniaturaTrocada: json.fotos[0].id,
       formato2: await adulterado((m, j) => { j.formato = 2; }),
       // JSON fora da forma do app (o que chegaria ao HTML sem conferir)
       forma: {
@@ -271,6 +298,13 @@ export default async function ({ page, browser, base, ok }) {
         }),
         outroImovel: await adulterado((m, j) => { j.fotos[0].imovelId = 'IM-999'; }),
         fachadaDesconhecida: await adulterado((m, j) => { j.imovel.fachada.fotoId = 'FOTO-que-nao-existe'; }),
+        // ['ASS-1'] vira "ASS-1" num teste de expressão regular: o tipo também é conferido
+        idEmArray: await adulterado((m, j) => { j.assinaturas[0].id = [j.assinaturas[0].id]; }),
+        precisaoComHtml: await adulterado((m, j) => {
+          j.imovel.gps = { lat: -1.44, lon: -48.47, precisao: '<img src=x onerror=alert(1)>', capturadoEm: j.imovel.criadoEm };
+        }),
+        patologiasTexto: await adulterado((m, j) => { j.fotos[1].patologias = '<b>trinca</b>'; }),
+        nomeAmbienteNumero: await adulterado((m, j) => { j.ambientes[0].nome = 123; }),
       },
       danificado: await base64(new Blob([cru])),
       imovel: { ...completo.imovel, fachada: { ...completo.imovel.fachada, miniatura: null } },
@@ -320,20 +354,33 @@ export default async function ({ page, browser, base, ok }) {
     for (const [k, s] of Object.entries(o.forma)) out.forma[k] = await erroDe(s);
     out.nadaGravado = (await db.listarImoveis()).length === 0;
 
+    // miniatura trocada no arquivo: a restaurada é feita a partir da foto conferida
+    const { miniaturaDaFoto } = await import('/js/foto.js');
+    const lidoTrocado = await lerBackup(arquivo(o.miniaturaTrocada));
+    const fTrocada = lidoTrocado.dados.fotos.find((f) => f.id === o.idFotoMiniaturaTrocada);
+    const { lerZip } = await import('/js/zip.js');
+    const adulterada = (await lerZip(arquivo(o.miniaturaTrocada))).get(`miniaturas/${o.idFotoMiniaturaTrocada}.jpg`);
+    out.miniaturaRefeita = fTrocada.miniatura instanceof Blob && fTrocada.miniatura.type === 'image/jpeg'
+      && !igual(await bytesDe(fTrocada.miniatura), adulterada)
+      && igual(await bytesDe(fTrocada.miniatura), await bytesDe(await miniaturaDaFoto(fTrocada.blob)));
+
     const lido = await lerBackup(arquivo(o.zip));
     out.lido = lido.id === o.id && lido.atualizadoEm === o.imovel.atualizadoEm;
     await restaurarBackup(lido);
     const { imovel, ambientes, fotos, assinaturas } = await db.obterImovelCompleto(o.id);
 
     out.imovel = canonico({ ...imovel, fachada: { ...imovel.fachada, miniatura: null } }) === canonico(o.imovel);
+    const fotoFachada = fotos.find((f) => f.id === imovel.fachada.fotoId);
     out.miniaturaFachada = imovel.fachada.miniatura instanceof Blob
-      && igual(await bytesDe(imovel.fachada.miniatura), deBase64(o.fachadaMini64));
+      && igual(await bytesDe(imovel.fachada.miniatura), await bytesDe(await miniaturaDaFoto(fotoFachada.blob)))
+      && !igual(await bytesDe(imovel.fachada.miniatura), deBase64(o.fachadaMini64));
     out.ambientes = canonico(porId(ambientes)) === canonico(porId(o.ambientes));
     out.fotos = fotos.length === o.fotos.length && (await Promise.all(o.fotos.map(async ({ blob64, mini64, ...orig }) => {
       const f = fotos.find((x) => x.id === orig.id);
       const { blob, miniatura, ...resto } = f;
       return canonico(resto) === canonico(orig)
-        && igual(await bytesDe(blob), deBase64(blob64)) && igual(await bytesDe(miniatura), deBase64(mini64))
+        && igual(await bytesDe(blob), deBase64(blob64))
+        && igual(await bytesDe(miniatura), await bytesDe(await miniaturaDaFoto(blob)))
         && (await impressaoDigital(blob)) === f.hash && blob.type === 'image/jpeg';
     }))).every(Boolean);
     const [a] = assinaturas;
@@ -374,15 +421,16 @@ export default async function ({ page, browser, base, ok }) {
   ok(r2.erros.formato2 === `${nome}: este backup foi feito por uma versão mais nova do app. Atualize o app e tente de novo.`,
     `restaurar: formato desconhecido é recusado (${r2.erros.formato2})`);
   ok(r2.erros.danificado === `${nome}: Arquivo de backup danificado.`, `restaurar: zip danificado (${r2.erros.danificado})`);
-  ok(Object.keys(r2.forma).length === 7
+  ok(Object.keys(r2.forma).length === 11
     && Object.values(r2.forma).every((m) => m === `${nome}: Este arquivo não foi feito pelo app.`),
-  `restaurar: status com HTML, foto em ambiente desconhecido, ids com aspas/espaço, id do imóvel fora do padrão, registro de outro imóvel e fachada desconhecida são recusados (${JSON.stringify(r2.forma)})`);
+  `restaurar: status com HTML, foto em ambiente desconhecido, ids com aspas/espaço/em lista, id do imóvel fora do padrão, registro de outro imóvel, fachada desconhecida, precisão do GPS com HTML, patologias em texto e nome de ambiente em número são recusados (${JSON.stringify(r2.forma)})`);
+  ok(r2.miniaturaRefeita, 'restaurar: miniatura trocada no arquivo é ignorada; a restaurada é feita a partir da foto');
   ok(r2.nadaGravado,'restaurar: arquivo recusado não grava nada');
   ok(r2.lido, 'lerBackup devolve id e atualizadoEm do backup');
   ok(r2.imovel, 'restaurar: imóvel igual ao original (inclusive atualizadoEm)');
-  ok(r2.miniaturaFachada, 'restaurar: miniatura da fachada refeita com os mesmos bytes');
+  ok(r2.miniaturaFachada, 'restaurar: miniatura da fachada refeita a partir da foto conferida');
   ok(r2.ambientes, 'restaurar: ambientes iguais');
-  ok(r2.fotos, 'restaurar: fotos e miniaturas byte a byte, ids, horas e hash iguais');
+  ok(r2.fotos, 'restaurar: fotos byte a byte, ids, horas e hash iguais; miniaturas refeitas a partir das fotos');
   ok(r2.assinatura, 'restaurar: assinatura igual, PNG byte a byte, codigoDaAssinatura confere');
   ok(r2.trava === true, `restaurar: foto assinada continua sem poder ser apagada (${r2.trava})`);
   ok(r2.semPendencia, 'restaurar conta como backup feito');

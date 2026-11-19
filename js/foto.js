@@ -33,6 +33,38 @@ export async function impressaoDigital(blob) {
   return [...new Uint8Array(resumo)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Miniatura: recorte quadrado do centro da imagem, 240 × 240 px. */
+function gerarMiniatura(imagem) {
+  const lado = Math.min(imagem.width, imagem.height);
+  const mini = document.createElement('canvas');
+  mini.width = LADO_MINIATURA;
+  mini.height = LADO_MINIATURA;
+  mini.getContext('2d').drawImage(
+    imagem,
+    (imagem.width - lado) / 2, (imagem.height - lado) / 2, lado, lado,
+    0, 0, LADO_MINIATURA, LADO_MINIATURA
+  );
+  return paraBlob(mini, QUALIDADE_MINIATURA);
+}
+
+/**
+ * Miniatura refeita a partir da foto já gravada (usada ao restaurar um backup: a miniatura do
+ * arquivo não tem código de verificação, então não é usada).
+ */
+export async function miniaturaDaFoto(foto) {
+  let imagem;
+  try {
+    imagem = await createImageBitmap(foto);
+  } catch {
+    throw new Error('Não foi possível ler essa imagem.');
+  }
+  try {
+    return await gerarMiniatura(imagem);
+  } finally {
+    imagem.close();
+  }
+}
+
 /**
  * @param {Blob} arquivo  foto vinda da câmera ou da galeria
  * @param {string} carimbo texto do carimbo (ver textoCarimbo)
@@ -73,17 +105,8 @@ export async function processarFoto(arquivo, carimbo) {
     ctx.fillText(carimbo, 8, altura - faixa / 2);
     const foto = await paraBlob(tela, QUALIDADE_FOTO);
 
-    // ----- miniatura: recorte quadrado do centro -----
-    const lado = Math.min(imagem.width, imagem.height);
-    const mini = document.createElement('canvas');
-    mini.width = LADO_MINIATURA;
-    mini.height = LADO_MINIATURA;
-    mini.getContext('2d').drawImage(
-      imagem,
-      (imagem.width - lado) / 2, (imagem.height - lado) / 2, lado, lado,
-      0, 0, LADO_MINIATURA, LADO_MINIATURA
-    );
-    const miniatura = await paraBlob(mini, QUALIDADE_MINIATURA);
+    // ----- miniatura: recorte quadrado do centro (da imagem original) -----
+    const miniatura = await gerarMiniatura(imagem);
 
     return { foto, miniatura, hash: await impressaoDigital(foto) };
   } finally {

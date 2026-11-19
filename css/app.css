@@ -124,6 +124,8 @@ a { color: inherit; }
   border: 2px solid var(--perigo); box-shadow: none;
 }
 .botao-backup { margin-top: 24px; }
+.backup-baixado { display: grid; gap: 10px; margin-top: 24px; }
+.backup-baixado .ajuda { margin: 0; }
 .link-perigo {
   display: block; margin: 18px auto 0; min-height: 44px; padding: 0 12px;
   background: none; border: 0; color: var(--perigo); font: 600 16px var(--texto); text-decoration: underline;

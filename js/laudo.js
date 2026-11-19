@@ -1,6 +1,7 @@
 // Laudo de vistoria cautelar em PDF, gerado no próprio aparelho (sem internet) com o jsPDF.
-// As fotos carimbadas entram no PDF com os bytes JPEG originais (sem recompressão) e as assinaturas
-// com o PNG gravado, para que os códigos de verificação continuem valendo.
+// As fotos carimbadas entram no PDF com os bytes JPEG originais (sem recompressão). O PNG das
+// assinaturas é recodificado pelo jsPDF (mesmos pixels, outros bytes): a prova do PNG original,
+// com o código de verificação, fica no app e no backup.
 //
 // jsPDF: usamos o arquivo UMD (vendor/jspdf/jspdf.umd.min.js), que já traz embutidas as
 // dependências (fflate). Importado como módulo, ele se registra em self.jspdf.

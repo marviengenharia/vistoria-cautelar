@@ -366,11 +366,27 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   await page.waitForFunction(() => document.querySelector('.aviso-backup button')?.textContent.trim() === 'Compartilhar 4 arquivos', { timeout: 20000 });
   ok(true, 'arquivos preparados: botão "Compartilhar 4 arquivos"');
   await page.click('.aviso-backup button');
-  await page.waitForFunction(() => !document.querySelector('.aviso-backup'), { timeout: 10000 });
+  // "baixado" não prova que o arquivo saiu do celular: o backup só vale depois de "Já mandei…"
+  await page.waitForSelector('.aviso-backup [data-backup="ja-mandei"]', { timeout: 10000 });
   const baixados = await page.evaluate(() => window.__baixados.slice().sort());
   ok(baixados.join() === ['IM-001', 'IM-002', 'IM-003', 'IM-004'].map((i) => `${i}_${hoje}.zip`).join(),
-    `os 4 arquivos "baixados" e o aviso some (${baixados})`);
-  ok((await page.evaluate(async () => (await import('/js/backup.js')).imoveisSemBackup())).length === 0, 'backup registrado para os 4');
+    `os 4 arquivos "baixados" (${baixados})`);
+  const aposBaixarLista = await page.evaluate(async () => ({
+    texto: document.querySelector('.aviso-backup .backup-baixado').textContent.trim(),
+    botao: document.querySelector('.aviso-backup [data-backup="ja-mandei"]').textContent.trim(),
+    pendentes: (await (await import('/js/backup.js')).imoveisSemBackup()).length,
+  }));
+  ok(aposBaixarLista.texto === 'Arquivos salvos neste celular (pasta Downloads). Mande para o Drive ou WhatsApp para o backup valer.'
+    && aposBaixarLista.botao === 'Já mandei para fora do celular' && aposBaixarLista.pendentes === 4,
+  `baixado: avisa que o arquivo está no celular, mostra "Já mandei…" e não registra o backup (${JSON.stringify(aposBaixarLista)})`);
+  await esperar(300);
+  ok(Boolean(await page.$('.aviso-backup [data-backup="ja-mandei"]')), 'o aviso continua até tocar "Já mandei…"');
+  await limparMensagem();
+  await page.click('.aviso-backup [data-backup="ja-mandei"]');
+  await mensagemTem('Backup de 4 imóveis feito.');
+  await page.waitForFunction(() => !document.querySelector('.aviso-backup'), { timeout: 10000 });
+  ok((await page.evaluate(async () => (await import('/js/backup.js')).imoveisSemBackup())).length === 0,
+    '"Já mandei…": backup registrado para os 4, mensagem "Backup de 4 imóveis feito." e o aviso some');
 
   // mudança só de patologia: o imóvel volta a ficar sem backup
   await page.evaluate(async () => {
@@ -411,10 +427,28 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
     `cancelado: backup não registrado e "Compartilhar" continua (${JSON.stringify(aposCancelar)})`);
   await page.evaluate(() => { delete navigator.canShare; delete navigator.share; window.__baixados = []; });
   await page.click('#fazer-backup');
+  await page.waitForFunction(() => document.querySelector('#backup-baixado')?.hidden === false, { timeout: 10000 });
+  await esperar(300);
+  const aposBaixar = await page.evaluate(async () => ({
+    baixados: window.__baixados.join(),
+    texto: document.querySelector('#backup-baixado p').textContent.trim(),
+    botao: document.querySelector('#ja-mandei').textContent.trim(),
+    backupEscondido: document.querySelector('#fazer-backup').hidden,
+    avisoVisivel: !document.querySelector('#backup-baixado').hidden,
+    pendentes: (await (await import('/js/backup.js')).imoveisSemBackup()).map((p) => p.id).join(),
+  }));
+  ok(aposBaixar.baixados === `IM-001_${hoje}.zip`
+    && aposBaixar.texto === 'Arquivo salvo neste celular (pasta Downloads). Mande para o Drive ou WhatsApp para o backup valer.'
+    && aposBaixar.botao === 'Já mandei para fora do celular' && aposBaixar.backupEscondido && aposBaixar.avisoVisivel
+    && aposBaixar.pendentes === 'IM-001',
+  `imóvel baixado: aviso no lugar do botão, "Já mandei…" e backup ainda não registrado (${JSON.stringify(aposBaixar)})`);
+  await limparMensagem();
+  await page.click('#ja-mandei');
   await mensagemTem('Backup de IM-001 feito.');
-  ok((await page.evaluate(() => window.__baixados)).join() === `IM-001_${hoje}.zip`
-    && await page.$eval('#fazer-backup', (b) => b.textContent.trim()) === 'Fazer backup deste imóvel',
-  'imóvel: arquivo "baixado", mensagem "Backup de IM-001 feito." e o botão volta ao normal');
+  ok(await page.$eval('#fazer-backup', (b) => !b.hidden && b.textContent.trim() === 'Fazer backup deste imóvel')
+    && await page.$eval('#backup-baixado', (d) => d.hidden)
+    && !(await page.evaluate(async () => (await import('/js/backup.js')).imoveisSemBackup())).some((p) => p.id === 'IM-001'),
+  'imóvel: "Já mandei…" registra o backup, mostra "Backup de IM-001 feito." e o botão volta ao normal');
   await page.goto(base + '#/');
   await page.waitForSelector('.segmentos');
   ok(!(await page.$('.aviso-backup')), 'sem pendentes, o aviso some');
@@ -564,6 +598,16 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
     return [(await db.obterConfig('meusDados')).nome, await db.obterConfig('vistoriadorNome')].join('|');
   });
   ok(nomeGravado === 'Ana Responsável|Ana Responsável', `nome digitado na aba Laudo vai para "Meus dados" (${nomeGravado})`);
+  // nome digitado enquanto o PDF está sendo gerado: o PDF com o nome antigo é descartado
+  await espiarPdf();
+  await page.click('#gerar-laudo');
+  await page.waitForFunction(() => document.querySelector('#gerar-laudo').textContent.trim() === 'Gerando…', { timeout: 10000 });
+  await page.type('input[name="laudo-nome"]', ' '); // o espaço some no trim: o nome continua o mesmo
+  await page.waitForFunction(() => document.querySelector('#gerar-laudo').textContent.trim() !== 'Gerando…', { timeout: 30000 });
+  await esperar(300);
+  ok(await page.$eval('#gerar-laudo', (b) => b.textContent.trim()) === 'Gerar laudo',
+    'nome digitado durante a geração: o PDF em preparo é descartado (botão volta a "Gerar laudo")');
+  await esperar(700);
   // laudo pronto e a fachada muda: o PDF velho é descartado
   await espiarPdf();
   await page.click('#gerar-laudo');
@@ -722,4 +766,50 @@ export default async function ({ page, base, ok, fixture, esperar, pararServidor
   } finally {
     fs.rmSync(pastaBackup, { recursive: true, force: true });
   }
+
+  // ---------- "Fazer backup dos 12": prepara um lote de 10 por vez ----------
+  await page.evaluate(async () => {
+    const db = await import('/js/db.js');
+    const { registrarBackup } = await import('/js/backup.js');
+    const amanha = new Date(Date.now() + 864e5).toISOString();
+    await registrarBackup((await db.listarImoveis()).map((im) => im.id), amanha); // os de antes ficam fora
+    for (let i = 0; i < 12; i += 1) await db.criarImovel();
+  });
+  await page.goto(base + '#/');
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.waitForSelector('.aviso-backup');
+  ok(await page.$eval('.aviso-backup button', (b) => b.textContent.trim()) === 'Fazer backup dos 12', '12 pendentes: "Fazer backup dos 12"');
+  await page.evaluate(() => {
+    // guarda o maior "Preparando i de n" e quantos arquivos vão para a folha de compartilhamento
+    window.__maiorPreparando = 0;
+    window.__compartilhados = [];
+    const aviso = document.querySelector('#lugar-backup');
+    new MutationObserver(() => {
+      const m = /Preparando (\d+) de/.exec(aviso.textContent);
+      if (m) window.__maiorPreparando = Math.max(window.__maiorPreparando, Number(m[1]));
+    }).observe(aviso, { childList: true, characterData: true, subtree: true });
+    navigator.canShare = () => true;
+    navigator.share = (d) => { window.__compartilhados.push(d.files.length); return Promise.resolve(); };
+  });
+  await page.click('.aviso-backup button');
+  await page.waitForFunction(() => /^Compartilhar /.test(document.querySelector('.aviso-backup button')?.textContent.trim()), { timeout: 20000 });
+  const lote1 = await page.evaluate(() => ({
+    maior: window.__maiorPreparando, botao: document.querySelector('.aviso-backup button').textContent.trim(),
+  }));
+  ok(lote1.maior === 10 && lote1.botao === 'Compartilhar arquivos 1 a 10',
+    `primeiro lote: só 10 arquivos preparados e "Compartilhar arquivos 1 a 10" (${JSON.stringify(lote1)})`);
+  await page.click('.aviso-backup button');
+  await page.waitForFunction(() => document.querySelector('.aviso-backup button')?.textContent.trim() === 'Preparar próximo lote (2 de 2)', { timeout: 10000 });
+  ok((await page.evaluate(() => window.__compartilhados)).join() === '10'
+    && (await page.evaluate(async () => (await import('/js/backup.js')).imoveisSemBackup())).length === 2,
+  'lote 1 compartilhado: 10 arquivos, backup registrado para eles e botão "Preparar próximo lote (2 de 2)"');
+  await page.click('.aviso-backup button');
+  await page.waitForFunction(() => document.querySelector('.aviso-backup button')?.textContent.trim() === 'Compartilhar arquivos 11 a 12', { timeout: 20000 });
+  await limparMensagem();
+  await page.click('.aviso-backup button');
+  await mensagemTem('Backup de 2 imóveis feito.');
+  await page.waitForFunction(() => !document.querySelector('.aviso-backup'), { timeout: 10000 });
+  ok((await page.evaluate(() => window.__compartilhados)).join() === '10,2'
+    && (await page.evaluate(async () => (await import('/js/backup.js')).imoveisSemBackup())).length === 0,
+  'lote 2 (2 arquivos) compartilhado: os 12 com backup e o aviso some');
 }

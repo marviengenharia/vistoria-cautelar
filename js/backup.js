@@ -4,7 +4,7 @@ import {
   obterImovelCompleto, listarImoveis, obterConfig, gravarConfig, codigoDaAssinatura, restaurarImovel,
 } from './db.js';
 import { criarZip, lerZip } from './zip.js';
-import { impressaoDigital } from './foto.js';
+import { impressaoDigital, miniaturaDaFoto } from './foto.js';
 import { STATUS } from './dominio.js';
 
 const FORMATO = 1;
@@ -59,15 +59,56 @@ const NAO_E_DO_APP = 'Este arquivo não foi feito pelo app.';
 const ID_IMOVEL = /^IM-\d{3,}$/;
 const ID_REGISTRO = /^[\w-]{1,64}$/;
 
-/** O imovel.json tem a forma que o app grava? (ids, ligações entre registros e situação conhecida) */
+// Conferência de tipo: o que vem do arquivo vai para a tela e para métodos de texto.
+const texto = (v) => typeof v === 'string';
+const textoOuNada = (v) => v === undefined || v === null || typeof v === 'string';
+const numeroOuNada = (v) => v === undefined || v === null || (typeof v === 'number' && Number.isFinite(v));
+const idRegistro = (v) => texto(v) && ID_REGISTRO.test(v);
+const objeto = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+/** Campos de texto do imóvel que podem faltar em imóvel antigo (se vierem, têm de ser texto). */
+const TEXTOS_IMOVEL = [
+  'endereco', 'referencia', 'estaca', 'lado', 'ocupanteNome', 'ocupanteTelefone', 'ocupanteCondicao',
+  'uso', 'estrutura', 'cobertura', 'fundacao', 'idadeAparente', 'conservacao', 'recusaMotivo', 'recusaTestemunha',
+];
+const TEXTOS_ASSINATURA = ['tipo', 'inicio', 'texto', 'motivoRecusa'];
+
+function imovelValido(im) {
+  if (!objeto(im) || !texto(im.id) || !ID_IMOVEL.test(im.id)) return false;
+  if (!STATUS.some((s) => s.valor === im.status)) return false;
+  if (![im.criadoEm, im.atualizadoEm, im.observacoes].every(texto)) return false;
+  if (!TEXTOS_IMOVEL.every((c) => textoOuNada(im[c]))) return false;
+  if (!numeroOuNada(im.distanciaObra) || !numeroOuNada(im.pavimentos)) return false;
+  if (im.gps != null && !(objeto(im.gps) && [im.gps.lat, im.gps.lon, im.gps.precisao].every(numeroOuNada)
+    && textoOuNada(im.gps.capturadoEm))) return false;
+  return im.fachada == null || (objeto(im.fachada) && idRegistro(im.fachada.fotoId) && textoOuNada(im.fachada.tiradaEm));
+}
+
+const ambienteValido = (a) => texto(a.nome) && texto(a.criadoEm);
+
+const fotoValida = (f) => idRegistro(f.ambienteId) && texto(f.tiradaEm) && texto(f.entrouEm)
+  && Array.isArray(f.patologias) && f.patologias.every(texto) && numeroOuNada(f.abertura)
+  && ['local', 'descricao', 'origemHora', 'hash'].every((c) => textoOuNada(f[c]));
+
+const assinaturaValida = (a) => texto(a.assinadoEm) && TEXTOS_ASSINATURA.every((c) => textoOuNada(a[c]))
+  && Array.isArray(a.fotos) && a.fotos.every((f) => objeto(f) && idRegistro(f.id) && texto(f.hash))
+  && PESSOAS.every((p) => a[p] == null || (objeto(a[p]) && textoOuNada(a[p].nome) && textoOuNada(a[p].documento)
+    && textoOuNada(a[p].assinatura)));
+
+/** O imovel.json tem a forma que o app grava? (tipos, ids, ligações entre registros e situação conhecida) */
 function formaValida({ imovel, ambientes, fotos, assinaturas }) {
   const listas = [ambientes, fotos, assinaturas];
-  if (!ID_IMOVEL.test(imovel?.id ?? '') || !listas.every(Array.isArray)) return false;
-  if (!STATUS.some((s) => s.valor === imovel.status)) return false;
-  if (!listas.flat().every((r) => r?.imovelId === imovel.id && ID_REGISTRO.test(r.id ?? ''))) return false;
+  if (!imovelValido(imovel) || !listas.every(Array.isArray)) return false;
+  if (!listas.flat().every((r) => objeto(r) && r.imovelId === imovel.id && idRegistro(r.id))) return false;
+  if (!ambientes.every(ambienteValido) || !fotos.every(fotoValida) || !assinaturas.every(assinaturaValida)) return false;
   const idsAmbientes = new Set(ambientes.map((a) => a.id));
   if (!fotos.every((f) => idsAmbientes.has(f.ambienteId))) return false;
   return !imovel.fachada?.fotoId || fotos.some((f) => f.id === imovel.fachada.fotoId);
+}
+
+/** Hora do arquivo no formato que o app grava (toISOString); senão, agora. */
+function horaValida(valor) {
+  const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+  return texto(valor) && iso.test(valor) && !Number.isNaN(Date.parse(valor)) ? valor : new Date().toISOString();
 }
 
 /**
@@ -103,8 +144,7 @@ export async function lerBackup(arquivo) {
     if (!bytes) throw falha(`falta a foto ${i + 1} no arquivo.`);
     const blob = new Blob([bytes], { type: 'image/jpeg' });
     if ((await impressaoDigital(blob)) !== f.hash) throw falha(`a foto ${i + 1} não confere com o código de verificação.`);
-    const mini = mapa.get(`miniaturas/${f.id}.jpg`);
-    fotosProntas.push({ ...f, blob, miniatura: mini ? new Blob([mini], { type: 'image/jpeg' }) : null });
+    fotosProntas.push({ ...f, blob });
   }
 
   const assinaturasProntas = [];
@@ -128,17 +168,27 @@ export async function lerBackup(arquivo) {
     assinaturasProntas.push(registro);
   }
 
+  // A miniatura do arquivo não tem código de verificação: é refeita a partir da foto conferida
+  // (a da fachada vem daí). Fica aqui, antes da gravação: a transação do banco não pode esperar isso.
+  for (const [i, f] of fotosProntas.entries()) {
+    try {
+      f.miniatura = await miniaturaDaFoto(f.blob);
+    } catch {
+      throw falha(`não foi possível ler a foto ${i + 1}.`);
+    }
+  }
+
   return {
     id,
-    atualizadoEm: imovel.atualizadoEm ?? null,
-    dados: { geradoEm: json.geradoEm ?? null, imovel, ambientes, fotos: fotosProntas, assinaturas: assinaturasProntas },
+    atualizadoEm: imovel.atualizadoEm,
+    dados: { geradoEm: horaValida(json.geradoEm), imovel, ambientes, fotos: fotosProntas, assinaturas: assinaturasProntas },
   };
 }
 
 /** Grava o imóvel lido por lerBackup (substitui o que houver) e conta como backup feito. */
 export async function restaurarBackup({ id, dados }) {
   await restaurarImovel(dados);
-  await registrarBackup([id], dados.geradoEm ?? new Date().toISOString());
+  await registrarBackup([id], horaValida(dados.geradoEm));
 }
 
 /**

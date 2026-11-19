@@ -62,7 +62,7 @@ function selecao(nome, opcoes, atual) {
 function maisMenos(nome, valor, min, max) {
   return `<div class="mais-menos">
     <button type="button" class="botao-passo" data-campo="${nome}" data-passo="-1" aria-label="Menos">−</button>
-    <input type="number" name="${nome}" value="${valor ?? ''}" min="${min}" max="${max}" inputmode="numeric">
+    <input type="number" name="${nome}" value="${esc(valor)}" min="${min}" max="${max}" inputmode="numeric">
     <button type="button" class="botao-passo" data-campo="${nome}" data-passo="1" aria-label="Mais">+</button>
   </div>`;
 }
@@ -117,7 +117,7 @@ const BLOCOS = [
       ${campo('Estaca mais próxima', texto('estaca', im.estaca, 'placeholder="ex.: 42+10" inputmode="text"'))}
       ${grupo('Lado da obra', chips('lado', LADOS, im.lado))}
       ${campo('Distância à borda da obra (m)',
-        `<input type="number" name="distanciaObra" value="${im.distanciaObra ?? ''}" min="0" step="0.1" inputmode="decimal">`,
+        `<input type="number" name="distanciaObra" value="${esc(im.distanciaObra)}" min="0" step="0.1" inputmode="decimal">`,
         'Por enquanto, preencher à mão. Na etapa do mapa passa a ser calculada pelo GPS.')}`,
   },
   {
@@ -172,7 +172,7 @@ function gpsHtml(gps, buscando = false) {
   const q = qualidadeGps(gps.precisao);
   return `
     <p class="gps-coord">${numeroBr(gps.lat, 6)}, ${numeroBr(gps.lon, 6)}</p>
-    <p>Precisão <strong class="precisao-${q.classe}">±${gps.precisao} m (${q.texto})</strong></p>
+    <p>Precisão <strong class="precisao-${q.classe}">±${esc(gps.precisao)} m (${q.texto})</strong></p>
     <p class="ajuda">${buscando ? 'Melhorando a leitura…' : `Capturado em ${dataHora(gps.capturadoEm)}`}</p>`;
 }
 
@@ -334,6 +334,10 @@ export async function telaImovel(raiz, id, aba) {
         Criado em ${dataHora(imovel.criadoEm)}<br>
         <span id="ultima-alteracao">Última alteração: ${dataHora(imovel.atualizadoEm)}</span>
       </p>
+      <div class="backup-baixado" id="backup-baixado" hidden>
+        <p class="ajuda">Arquivo salvo neste celular (pasta Downloads). Mande para o Drive ou WhatsApp para o backup valer.</p>
+        <button type="button" class="botao botao-largo botao-secundario" id="ja-mandei">Já mandei para fora do celular</button>
+      </div>
       <button type="button" class="botao botao-largo botao-secundario botao-backup" id="fazer-backup">Fazer backup deste imóvel</button>
       <button type="button" class="botao botao-perigo" id="excluir">Excluir este imóvel</button>`;
 
@@ -466,8 +470,40 @@ export async function telaImovel(raiz, id, aba) {
     // Dois toques: o 1º prepara o arquivo; o 2º abre o Compartilhar. No iPhone a folha de
     // compartilhamento só abre se for chamada direto do toque, sem espera antes.
     const botaoBackup = conteudo.querySelector('#fazer-backup');
+    const avisoBaixado = conteudo.querySelector('#backup-baixado');
+    const botaoJaMandei = conteudo.querySelector('#ja-mandei');
     const ROTULO_BACKUP = 'Fazer backup deste imóvel';
     let backupPronto = null; // { arquivo: File, preparadoEm: string }
+    let baixadoEm = null; // preparadoEm do arquivo que ficou na pasta Downloads, à espera do "Já mandei"
+
+    // "Baixado" não prova que o arquivo saiu do celular (o Chrome do Android não compartilha .zip):
+    // o backup só conta depois que a pessoa confirma que mandou o arquivo para fora.
+    function mostrarAvisoBaixado(preparadoEm) {
+      baixadoEm = preparadoEm;
+      botaoBackup.hidden = true;
+      avisoBaixado.hidden = false;
+    }
+
+    function esconderAvisoBaixado() {
+      baixadoEm = null;
+      avisoBaixado.hidden = true;
+      botaoBackup.hidden = false;
+    }
+
+    botaoJaMandei.addEventListener('click', async () => {
+      if (!baixadoEm) return;
+      botaoJaMandei.disabled = true;
+      try {
+        await registrarBackup([id], baixadoEm);
+        esconderAvisoBaixado();
+        mostrarMensagem(`Backup de ${id} feito.`);
+      } catch (erro) {
+        console.error(erro);
+        mostrarMensagem('Não foi possível registrar o backup: ' + erro.message, 'erro');
+      } finally {
+        botaoJaMandei.disabled = false;
+      }
+    });
 
     function descartarBackupPronto() {
       if (!backupPronto) return;
@@ -504,6 +540,11 @@ export async function telaImovel(raiz, id, aba) {
       botaoBackup.disabled = true;
       envio.then(async (resultado) => {
         if (resultado === 'cancelado') return; // o botão "Compartilhar" continua disponível
+        if (resultado === 'baixado') {
+          if (backupPronto === pronto) descartarBackupPronto();
+          mostrarAvisoBaixado(pronto.preparadoEm);
+          return;
+        }
         await registrarBackup([id], pronto.preparadoEm);
         if (backupPronto === pronto) descartarBackupPronto();
         mostrarMensagem(`Backup de ${id} feito.`);

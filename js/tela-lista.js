@@ -215,12 +215,19 @@ export async function telaLista(raiz) {
   // ---------- aviso "sem backup" ----------
   // Dois toques: o 1º prepara os arquivos; o 2º abre o Compartilhar. No iPhone a folha de
   // compartilhamento só abre se for chamada direto do toque, sem espera antes.
+  // Prepara um lote de até 10 por vez (não guarda todos os arquivos na memória de uma vez).
   const lugarBackup = raiz.querySelector('#lugar-backup');
-  let lotes = null; // [{ arquivos: File[], ids: string[], feito: boolean }]
-  let preparadoEm = null;
+  let fila = null;   // ids sem backup no momento do 1º toque
+  let feitos = 0;    // quantos da fila já tiveram o backup registrado
+  let lote = null;   // { arquivos: File[], ids: string[], preparadoEm: string }
+
+  const totalLotes = () => Math.ceil(fila.length / ARQUIVOS_POR_VEZ);
+  const mensagemFeito = (ids) => (ids.length === 1 ? `Backup de ${ids[0]} feito.` : `Backup de ${ids.length} imóveis feito.`);
 
   function desenharBackup(pendentes) {
-    lotes = null;
+    fila = null;
+    feitos = 0;
+    lote = null;
     if (!pendentes.length) {
       lugarBackup.innerHTML = '';
       return;
@@ -239,33 +246,28 @@ export async function telaLista(raiz) {
       </section>`;
   }
 
-  function rotuloLote(lote, i) {
+  const lugarBotoes = () => lugarBackup.querySelector('.aviso-backup-botoes');
+
+  function rotuloLote() {
     if (lote.arquivos.length === 1) return `Compartilhar ${lote.arquivos[0].name}`;
-    if (lotes.length === 1) return `Compartilhar ${lote.arquivos.length} arquivos`;
-    const inicio = i * ARQUIVOS_POR_VEZ + 1;
-    return `Compartilhar arquivos ${inicio} a ${inicio + lote.arquivos.length - 1}`;
+    if (totalLotes() === 1) return `Compartilhar ${lote.arquivos.length} arquivos`;
+    return `Compartilhar arquivos ${feitos + 1} a ${feitos + lote.arquivos.length}`;
   }
 
-  async function prepararBackups(botao) {
+  async function prepararLote(botao) {
     botao.disabled = true;
     try {
-      const pendentes = await imoveisSemBackup();
-      preparadoEm = new Date().toISOString(); // mudança feita depois disso continua sem backup
+      if (!fila) fila = (await imoveisSemBackup()).map((p) => p.id);
+      const ids = fila.slice(feitos, feitos + ARQUIVOS_POR_VEZ);
+      const preparadoEm = new Date().toISOString(); // mudança feita depois disso continua sem backup
       const arquivos = [];
-      for (const [i, p] of pendentes.entries()) {
-        botao.textContent = `Preparando ${i + 1} de ${pendentes.length}…`;
-        arquivos.push(await montarBackup(p.id));
+      for (const [i, id] of ids.entries()) {
+        botao.textContent = `Preparando ${feitos + i + 1} de ${fila.length}…`;
+        arquivos.push(await montarBackup(id));
       }
-      lotes = [];
-      for (let i = 0; i < pendentes.length; i += ARQUIVOS_POR_VEZ) {
-        lotes.push({
-          arquivos: arquivos.slice(i, i + ARQUIVOS_POR_VEZ),
-          ids: pendentes.slice(i, i + ARQUIVOS_POR_VEZ).map((p) => p.id),
-          feito: false,
-        });
-      }
-      lugarBackup.querySelector('.aviso-backup-botoes').innerHTML = lotes.map((l, i) => `
-        <button type="button" class="botao botao-largo" data-lote="${i}">${esc(rotuloLote(l, i))}</button>`).join('');
+      lote = { arquivos, ids, preparadoEm };
+      lugarBotoes().innerHTML = `
+        <button type="button" class="botao botao-largo" data-backup="compartilhar">${esc(rotuloLote())}</button>`;
     } catch (erro) {
       console.error(erro);
       mostrarMensagem('Não foi possível preparar o backup: ' + erro.message, 'erro');
@@ -273,24 +275,45 @@ export async function telaLista(raiz) {
     }
   }
 
+  /** Backup do lote registrado: segue para o próximo lote ou termina. */
+  async function concluirLote() {
+    const { ids, preparadoEm } = lote;
+    await registrarBackup(ids, preparadoEm);
+    lote = null;
+    feitos += ids.length;
+    mostrarMensagem(mensagemFeito(ids));
+    if (feitos < fila.length) {
+      const proximo = feitos / ARQUIVOS_POR_VEZ + 1;
+      lugarBotoes().innerHTML = `
+        <button type="button" class="botao botao-largo" data-backup="preparar">Preparar próximo lote (${proximo} de ${totalLotes()})</button>`;
+    } else {
+      desenharBackup(await imoveisSemBackup());
+    }
+  }
+
   function compartilharLote(botao) {
-    const lote = lotes[Number(botao.dataset.lote)];
+    const atual = lote;
     // primeira coisa do toque, sem nenhum await antes (regra do iPhone)
-    const envio = compartilharArquivos(lote.arquivos, 'Backup da vistoria');
+    const envio = compartilharArquivos(atual.arquivos, 'Backup da vistoria');
     botao.disabled = true;
     envio.then(async (resultado) => {
       if (resultado === 'cancelado') {
         botao.disabled = false; // continua disponível para tentar de novo
         return;
       }
-      await registrarBackup(lote.ids, preparadoEm);
-      lote.feito = true;
-      botao.textContent = 'Pronto ✓';
-      if (lotes.every((l) => l.feito)) {
-        const ids = lotes.flatMap((l) => l.ids);
-        mostrarMensagem(ids.length === 1 ? `Backup de ${ids[0]} feito.` : `Backup de ${ids.length} imóveis feito.`);
-        desenharBackup(await imoveisSemBackup());
+      if (resultado === 'baixado') {
+        // "baixado" não prova que o arquivo saiu do celular (o Chrome do Android não compartilha
+        // .zip): o backup só conta depois que a pessoa confirma que mandou para fora
+        atual.arquivos = null; // o arquivo já está na pasta Downloads; libera a memória
+        const varios = atual.ids.length > 1;
+        lugarBotoes().innerHTML = `
+          <p class="aviso-backup-ajuda backup-baixado">${varios
+            ? 'Arquivos salvos neste celular (pasta Downloads). Mande para o Drive ou WhatsApp para o backup valer.'
+            : 'Arquivo salvo neste celular (pasta Downloads). Mande para o Drive ou WhatsApp para o backup valer.'}</p>
+          <button type="button" class="botao botao-largo" data-backup="ja-mandei">Já mandei para fora do celular</button>`;
+        return;
       }
+      await concluirLote();
     }).catch((erro) => {
       console.error(erro);
       mostrarMensagem('Não foi possível fazer o backup: ' + erro.message, 'erro');
@@ -298,11 +321,24 @@ export async function telaLista(raiz) {
     });
   }
 
+  async function jaMandei(botao) {
+    botao.disabled = true;
+    try {
+      await concluirLote();
+    } catch (erro) {
+      console.error(erro);
+      mostrarMensagem('Não foi possível registrar o backup: ' + erro.message, 'erro');
+      botao.disabled = false;
+    }
+  }
+
   lugarBackup.addEventListener('click', (e) => {
     const botao = e.target.closest('button');
     if (!botao || botao.disabled) return;
-    if (botao.dataset.lote !== undefined) compartilharLote(botao);
-    else if (botao.dataset.backup === 'preparar') prepararBackups(botao);
+    const acao = botao.dataset.backup;
+    if (acao === 'compartilhar' && lote?.arquivos) compartilharLote(botao);
+    else if (acao === 'ja-mandei' && lote) jaMandei(botao);
+    else if (acao === 'preparar') prepararLote(botao);
   });
 
   // ---------- restaurar backup (uso raro: celular novo) ----------

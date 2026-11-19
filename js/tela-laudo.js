@@ -102,6 +102,7 @@ export async function telaLaudo(conteudo, imovel, { mostrarEstado }) {
   entradaNome?.addEventListener('input', () => {
     meusDados = { ...meusDados, nome: entradaNome.value.trim() };
     nomePendente = meusDados.nome;
+    geracao += 1; // o PDF que estiver sendo gerado leva o nome antigo: nasce velho
     descartarArquivoPronto(); // o nome está dentro do PDF
     atualizarBotao();
     mostrarEstado('salvando', 'Salvando…');
